@@ -1,4 +1,3 @@
-package org.apache.cassandra.concurrent;
 /*
  *
  * Licensed to the Apache Software Foundation (ASF) under one
@@ -19,7 +18,7 @@ package org.apache.cassandra.concurrent;
  * under the License.
  *
  */
-
+package org.apache.cassandra.concurrent;
 
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -51,10 +50,9 @@ public class DebuggableThreadPoolExecutorTest
         {
             executor.execute(runnable);
         }
-        assert q.size() > 0 : q.size();
-        while (executor.getCompletedTaskCount() < 10)
-            continue;
-        long delta = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        executor.shutdown();
+        executor.awaitTermination(1, TimeUnit.MINUTES);
+        long delta = System.nanoTime() - start;
         assert delta >= 9 * 50 : delta;
     }
 }
