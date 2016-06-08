@@ -30,7 +30,6 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.FileUtils;
 
 public class MessageIn<T>
 {
@@ -108,10 +107,15 @@ public class MessageIn<T>
     {
         return parameters.containsKey(MessagingService.FAILURE_CALLBACK_PARAM);
     }
-
+    
     public boolean isFailureResponse()
     {
         return parameters.containsKey(MessagingService.FAILURE_RESPONSE_PARAM);
+    }
+        
+    public boolean supportsBackPressure()
+    {
+        return parameters.containsKey(MessagingService.BACKPRESSURE_SUPPORT_PARAM);
     }
 
     public long getTimeout()

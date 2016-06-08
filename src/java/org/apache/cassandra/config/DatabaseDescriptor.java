@@ -1122,8 +1122,9 @@ public class DatabaseDescriptor
                 return getRangeRpcTimeout();
             case TRUNCATE:
                 return getTruncateRpcTimeout();
-            case READ_REPAIR:
             case MUTATION:
+                return backPressureEnabled() ? getBackPressureTimeoutOverride() : getWriteRpcTimeout();
+            case READ_REPAIR:
             case PAXOS_COMMIT:
             case PAXOS_PREPARE:
             case PAXOS_PROPOSE:
@@ -1980,4 +1981,58 @@ public class DatabaseDescriptor
         return conf.gc_warn_threshold_in_ms;
     }
 
+    public static void setBackPressureEnabled(boolean backPressureEnabled)
+    {
+        conf.back_pressure_enabled = backPressureEnabled;
+    }
+
+    public static boolean backPressureEnabled()
+    {
+        return conf.back_pressure_enabled;
+    }
+
+    public static void setBackPressureLowRatio(double backPressureLowRatio)
+    {
+        if (backPressureLowRatio <= 0 || backPressureLowRatio > 1)
+            throw new ConfigurationException("Back-pressure low ratio must be > 0 and <= 1", false);
+        if (backPressureLowRatio >= conf.back_pressure_high_ratio)
+            throw new ConfigurationException("Back-pressure low ratio must be smaller than high ratio", false);
+        conf.back_pressure_low_ratio = backPressureLowRatio;
+    }
+
+    public static double getBackPressureLowRatio()
+    {
+        return conf.back_pressure_low_ratio;
+    }
+    
+    public static void setBackPressureHighRatio(double backPressureHighRatio)
+    {
+        if (backPressureHighRatio <= 0 || backPressureHighRatio > 1)
+            throw new ConfigurationException("Back-pressure high ratio must be > 0 and <= 1", false);
+        if (backPressureHighRatio <= conf.back_pressure_low_ratio)
+            throw new ConfigurationException("Back-pressure low ratio must be smaller than high ratio", false);
+        conf.back_pressure_high_ratio = backPressureHighRatio;
+    }
+
+    public static double getBackPressureHighRatio()
+    {
+        return conf.back_pressure_high_ratio;
+    }
+    
+    public static void setBackPressureChangeFactor(int backPressureChangeFactor)
+    {
+        if (backPressureChangeFactor < 1)
+            throw new ConfigurationException("Back-pressure change factor must be >= 1", false);
+        conf.back_pressure_change_factor = backPressureChangeFactor;
+    }
+
+    public static int getBackPressureChangeFactor()
+    {
+        return conf.back_pressure_change_factor;
+    }
+
+    public static long getBackPressureTimeoutOverride()
+    {
+        return conf.back_pressure_timeout_override;
+    }
 }

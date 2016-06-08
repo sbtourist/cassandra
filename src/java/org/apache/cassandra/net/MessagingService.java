@@ -24,10 +24,14 @@ import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -37,10 +41,13 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.common.util.concurrent.RateLimiter;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
@@ -90,6 +97,7 @@ public final class MessagingService implements MessagingServiceMBean
     public static final int current_version = VERSION_30;
 
     public static final String FAILURE_CALLBACK_PARAM = "CAL_BAC";
+    public static final String BACKPRESSURE_SUPPORT_PARAM = "BP_SUP";
     public static final byte[] ONE_BYTE = new byte[1];
     public static final String FAILURE_RESPONSE_PARAM = "FAIL";
 
@@ -318,8 +326,7 @@ public final class MessagingService implements MessagingServiceMBean
                                                                    Verb.REQUEST_RESPONSE,
                                                                    Verb.BATCH_STORE,
                                                                    Verb.BATCH_REMOVE);
-
-
+    
     private static final class DroppedMessages
     {
         final DroppedMessageMetrics metrics;
@@ -344,16 +351,12 @@ public final class MessagingService implements MessagingServiceMBean
 
     // message sinks are a testing hook
     private final Set<IMessageSink> messageSinks = new CopyOnWriteArraySet<>();
-
-    public void addMessageSink(IMessageSink sink)
-    {
-        messageSinks.add(sink);
-    }
-
-    public void clearMessageSinks()
-    {
-        messageSinks.clear();
-    }
+    
+    // back-pressure window sizes
+    private final long backPressureWindowSize = DatabaseDescriptor.getBackPressureTimeoutOverride();
+    private final long backPressureWindowHalfSize = backPressureWindowSize / 2;
+    // back-pressure info per replica
+    private final ConcurrentMap<InetAddress, BackPressureInfo> backPressureInfos = new ConcurrentHashMap<>();
 
     private static class MSHandle
     {
@@ -436,6 +439,134 @@ public final class MessagingService implements MessagingServiceMBean
                 throw new RuntimeException(e);
             }
         }
+    }
+    
+    public void addMessageSink(IMessageSink sink)
+    {
+        messageSinks.add(sink);
+    }
+
+    public void clearMessageSinks()
+    {
+        messageSinks.clear();
+    }
+    
+    /**
+     * Tracks back-pressure incoming rate if enabled and the given message supports it.
+     * 
+     * @param message The incoming message.
+     */
+    public void trackBackPressure(MessageIn message)
+    {
+        if (DatabaseDescriptor.backPressureEnabled() && message.supportsBackPressure())
+        {
+            backPressureInfos.get(message.from).incomingRate.update(1);
+        }
+    }
+    
+    /**
+     * Applies back-pressure by eventually rate-limiting or returning true if overloaded.
+     * 
+     * @param to The destination host to apply back-pressure to.
+     * @return True if overloaded, false otherwise.
+     */
+    public boolean applyBackPressure(InetAddress to)
+    {
+        if (DatabaseDescriptor.backPressureEnabled())
+        {
+            // Initialize the connection pool and related backpressure:
+            getConnectionPool(to);
+            // Increase outgoing rate:
+            backPressureInfos.get(to).outgoingRate.update(1);
+
+            RateLimiter limiter = backPressureInfos.get(to).outgoingLimiter;
+            ReentrantLock lock = backPressureInfos.get(to).lock;
+            long lastCheck = backPressureInfos.get(to).lastCheck.get();
+            long interval = backPressureWindowSize;
+            long now = System.currentTimeMillis();
+            // Check/Update the back-pressure state at a given interval and only on a single thread:
+            if ((now - lastCheck > interval) && lock.tryLock())
+            {
+                try
+                {
+                    // Get the incoming/outgoing rates by only looking into half the window size: we do not consider the 
+                    // full window so that we don't get biased by most recent outgoing requests that didn't receive
+                    // an incoming response *yet*; by looking at the first half of the window, we get instead a good
+                    // approximate measure of how many requests we sent and how many we've got back.
+                    double incomingRate = backPressureInfos.get(to).incomingRate.get(
+                            TimeUnit.SECONDS.convert(backPressureWindowHalfSize, TimeUnit.MILLISECONDS), 
+                            TimeUnit.SECONDS);
+                    double outgoingRate = backPressureInfos.get(to).outgoingRate.get(
+                            TimeUnit.SECONDS.convert(backPressureWindowHalfSize, TimeUnit.MILLISECONDS), 
+                            TimeUnit.SECONDS);
+
+                    // Now compute the incoming/outgoing ratio:
+                    double actualRatio = outgoingRate > 0 ? incomingRate / outgoingRate : 1;
+                    double highRatio = DatabaseDescriptor.getBackPressureHighRatio();
+                    double lowRatio = DatabaseDescriptor.getBackPressureLowRatio();
+                    // If the ratio is above the high mark, try growing by the back-pressure factor:
+                    if (actualRatio >= highRatio)
+                    {
+                        double newRate = limiter.getRate() + ((limiter.getRate() * DatabaseDescriptor.getBackPressureChangeFactor()) / 100);
+                        if (newRate > 0)
+                        {
+                            limiter.setRate(newRate);
+                        }
+                        backPressureInfos.get(to).overload.set(false);
+                    }
+                    // If in between low and high marks, set the rate limiter at the incoming rate, but reduced by
+                    // the back-pressure factor to make it sustainable:
+                    else if (actualRatio >= lowRatio && actualRatio < highRatio)
+                    {
+                        limiter.setRate(incomingRate - ((incomingRate * DatabaseDescriptor.getBackPressureChangeFactor()) / 100));
+                        backPressureInfos.get(to).overload.set(false);
+                    }
+                    // Otherwise if previously overloaded, clear the overload flag (we don't want to flood the
+                    // client with errors) and try limiting at a very reduced rate:
+                    else if (backPressureInfos.get(to).overload.get())
+                    {
+                        limiter.setRate(outgoingRate * lowRatio);
+                        backPressureInfos.get(to).overload.set(false);
+                    }
+                    // Finally if just below the low ratio, set the overload flag:
+                    else
+                    {
+                        backPressureInfos.get(to).overload.set(true);
+                    }
+
+                    // Housekeeping: pruning windows and resetting the last check timestamp!
+                    backPressureInfos.get(to).incomingRate.prune();
+                    backPressureInfos.get(to).outgoingRate.prune();
+                    backPressureInfos.get(to).lastCheck.set(now);
+
+                    logger.debug("Back-pressure enabled with: incoming rate {}, outgoing rate {}, ratio {}, rate limiting {}", 
+                                 incomingRate, outgoingRate, actualRatio, limiter.getRate());
+                }
+                finally
+                {
+                    lock.unlock();
+                }
+            }
+            // If overloaded, signal back by returning true!
+            if (backPressureInfos.get(to).overload.get())
+            {
+                return true;
+            }
+            // Otherwise rate limit:
+            limiter.acquire(1);
+        }
+        return false;
+    }
+    
+    // The back-pressure state, tracked per replica host:
+    private class BackPressureInfo
+    {
+        final SlidingTimeRate incomingRate = new SlidingTimeRate(backPressureWindowSize, 100, TimeUnit.MILLISECONDS);
+        final SlidingTimeRate outgoingRate = new SlidingTimeRate(backPressureWindowSize, 100, TimeUnit.MILLISECONDS);
+        final RateLimiter outgoingLimiter = RateLimiter.create(Double.MAX_VALUE);
+        final AtomicBoolean overload = new AtomicBoolean();
+        final AtomicLong lastCheck = new AtomicLong();
+        final ReentrantLock lock = new ReentrantLock();
     }
 
     /**
@@ -585,6 +716,7 @@ public final class MessagingService implements MessagingServiceMBean
             return;
         cp.close();
         connectionManagers.remove(to);
+        backPressureInfos.remove(to);
     }
 
     public OutboundTcpConnectionPool getConnectionPool(InetAddress to)
@@ -597,7 +729,10 @@ public final class MessagingService implements MessagingServiceMBean
             if (existingPool != null)
                 cp = existingPool;
             else
+            {
+                backPressureInfos.put(to, new BackPressureInfo());
                 cp.start();
+            }
         }
         cp.waitForStarted();
         return cp;
@@ -748,7 +883,7 @@ public final class MessagingService implements MessagingServiceMBean
 
         if (to.equals(FBUtilities.getBroadcastAddress()))
             logger.trace("Message-to-self {} going over MessagingService", message);
-
+        
         // message sinks are a testing hook
         for (IMessageSink ms : messageSinks)
             if (!ms.allowOutgoingMessage(message, id, to))

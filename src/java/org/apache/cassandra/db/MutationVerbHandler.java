@@ -20,7 +20,6 @@ package org.apache.cassandra.db;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.InetAddress;
-import java.util.function.Consumer;
 
 import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
@@ -33,7 +32,9 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     private void reply(int id, InetAddress replyTo)
     {
         Tracing.trace("Enqueuing response to {}", replyTo);
-        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, replyTo);
+        MessagingService.instance().sendReply(
+                WriteResponse.createMessage().withParameter(MessagingService.BACKPRESSURE_SUPPORT_PARAM, MessagingService.ONE_BYTE),
+                id, replyTo);
     }
 
     private void failed()

@@ -321,6 +321,12 @@ public class Config
      * (Only valid, if enable_user_defined_functions_threads==true)
      */
     public UserFunctionTimeoutPolicy user_function_timeout_policy = UserFunctionTimeoutPolicy.die;
+    
+    public volatile boolean back_pressure_enabled = false;
+    public volatile double back_pressure_high_ratio = 0.90;
+    public volatile double back_pressure_low_ratio = 0.10;
+    public volatile int back_pressure_change_factor = 25;
+    public volatile long back_pressure_timeout_override = 5000;
 
     public static boolean getOutboundBindAny()
     {
