@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,6 +54,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     private volatile int failures = 0;
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
+    private volatile boolean supportsBackPressure = true;
 
     /**
      * @param callback A callback to be called when the write is successful.
@@ -171,5 +173,16 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         if (totalBlockFor() + n > totalEndpoints())
             signal();
+    }
+
+    @Override
+    public boolean supportsBackPressure()
+    {
+        return supportsBackPressure;
+    }
+
+    public void setSupportsBackPressure(boolean supportsBackPressure)
+    {
+        this.supportsBackPressure = supportsBackPressure;
     }
 }

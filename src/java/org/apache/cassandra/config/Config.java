@@ -32,6 +32,8 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.net.RateBasedBackPressure;
+
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
  *
@@ -45,7 +47,6 @@ public class Config
      * Prefix for Java properties for internal Cassandra configuration options
      */
     public static final String PROPERTY_PREFIX = "cassandra.";
-
 
     public String cluster_name = "Test Cluster";
     public String authenticator;
@@ -354,6 +355,9 @@ public class Config
      * (Only valid, if enable_user_defined_functions_threads==true)
      */
     public UserFunctionTimeoutPolicy user_function_timeout_policy = UserFunctionTimeoutPolicy.die;
+
+    public volatile boolean back_pressure_enabled = false;
+    public volatile ParameterizedClass back_pressure_strategy = RateBasedBackPressure.withDefaultParams();
 
     public static boolean getOutboundBindAny()
     {

@@ -19,6 +19,7 @@ package org.apache.cassandra.config;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.net.*;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
@@ -53,6 +54,7 @@ import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.EndpointSnitchInfo;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.SeedProvider;
+import org.apache.cassandra.net.BackPressureStrategy;
 import org.apache.cassandra.scheduler.IRequestScheduler;
 import org.apache.cassandra.scheduler.NoScheduler;
 import org.apache.cassandra.security.EncryptionContext;
@@ -2341,5 +2343,45 @@ public class DatabaseDescriptor
     public static int searchConcurrencyFactor()
     {
         return Integer.parseInt(System.getProperty("cassandra.search_concurrency_factor", "1"));
+    }
+
+    public static void setBackPressureEnabled(boolean backPressureEnabled)
+    {
+        conf.back_pressure_enabled = backPressureEnabled;
+    }
+
+    public static boolean backPressureEnabled()
+    {
+        return conf.back_pressure_enabled;
+    }
+
+    @VisibleForTesting
+    public static void setBackPressureStrategy(ParameterizedClass strategy)
+    {
+        conf.back_pressure_strategy = strategy;
+    }
+
+    public static BackPressureStrategy getBackPressureStrategy()
+    {
+        try
+        {
+            ParameterizedClass strategy = conf.back_pressure_strategy;
+            Class<?> clazz = Class.forName(strategy.class_name);
+            if (!BackPressureStrategy.class.isAssignableFrom(clazz))
+                throw new ConfigurationException(strategy + " is not an instance of " + BackPressureStrategy.class.getCanonicalName(), false);
+
+            Constructor<?> ctor = clazz.getConstructor(Map.class);
+            BackPressureStrategy instance = (BackPressureStrategy) ctor.newInstance(strategy.parameters);
+            logger.info("Back-pressure is {} with strategy {}.", backPressureEnabled() ? "enabled" : "disabled", conf.back_pressure_strategy);
+            return instance;
+        }
+        catch (ConfigurationException ex)
+        {
+            throw ex;
+        }
+        catch (Exception ex)
+        {
+            throw new ConfigurationException("Error configuring back-pressure strategy: " + conf.back_pressure_strategy, ex);
+        }
     }
 }
