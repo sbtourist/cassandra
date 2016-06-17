@@ -19,6 +19,7 @@ package org.apache.cassandra.config;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.net.*;
 import java.nio.file.FileStore;
 import java.nio.file.Files;
@@ -26,6 +27,8 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableSet;
@@ -48,6 +51,7 @@ import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.*;
+import org.apache.cassandra.net.BackPressureStrategy;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.scheduler.IRequestScheduler;
 import org.apache.cassandra.scheduler.NoScheduler;
@@ -1990,49 +1994,41 @@ public class DatabaseDescriptor
     {
         return conf.back_pressure_enabled;
     }
-
-    public static void setBackPressureLowRatio(double backPressureLowRatio)
-    {
-        if (backPressureLowRatio <= 0 || backPressureLowRatio > 1)
-            throw new ConfigurationException("Back-pressure low ratio must be > 0 and <= 1", false);
-        if (backPressureLowRatio >= conf.back_pressure_high_ratio)
-            throw new ConfigurationException("Back-pressure low ratio must be smaller than high ratio", false);
-        conf.back_pressure_low_ratio = backPressureLowRatio;
-    }
-
-    public static double getBackPressureLowRatio()
-    {
-        return conf.back_pressure_low_ratio;
-    }
     
-    public static void setBackPressureHighRatio(double backPressureHighRatio)
-    {
-        if (backPressureHighRatio <= 0 || backPressureHighRatio > 1)
-            throw new ConfigurationException("Back-pressure high ratio must be > 0 and <= 1", false);
-        if (backPressureHighRatio <= conf.back_pressure_low_ratio)
-            throw new ConfigurationException("Back-pressure low ratio must be smaller than high ratio", false);
-        conf.back_pressure_high_ratio = backPressureHighRatio;
-    }
-
-    public static double getBackPressureHighRatio()
-    {
-        return conf.back_pressure_high_ratio;
-    }
-    
-    public static void setBackPressureChangeFactor(int backPressureChangeFactor)
-    {
-        if (backPressureChangeFactor < 1)
-            throw new ConfigurationException("Back-pressure change factor must be >= 1", false);
-        conf.back_pressure_change_factor = backPressureChangeFactor;
-    }
-
-    public static int getBackPressureChangeFactor()
-    {
-        return conf.back_pressure_change_factor;
-    }
-
     public static long getBackPressureTimeoutOverride()
     {
         return conf.back_pressure_timeout_override;
+    }
+
+    public static BackPressureStrategy.Factory getBackPressureFactory()
+    {
+        try
+        {
+            Pattern pattern = Pattern.compile("(.+)\\((.+)\\)");
+            Matcher matcher = pattern.matcher(conf.back_pressure_factory);
+            if (matcher.find())
+            {
+                String factory = matcher.group(1);
+                String[] arguments = matcher.group(2).split(",");
+
+                Class<?> clazz = Class.forName(factory);
+                if (!BackPressureStrategy.Factory.class.isAssignableFrom(clazz))
+                    throw new ConfigurationException(factory + " is not an instance of " + BackPressureStrategy.Factory.class.getCanonicalName(), false);
+
+                Constructor<?> ctor = clazz.getConstructor(String[].class);
+                BackPressureStrategy.Factory instance = (BackPressureStrategy.Factory) ctor.newInstance((Object) arguments);
+                logger.info("Back-pressure is {} with implementation {}.", backPressureEnabled() ? "enabled" : "disabled", conf.back_pressure_factory);
+                return instance;
+            }
+            throw new ConfigurationException("Wrong back-pressure factory configuration: " + conf.back_pressure_factory, false);
+        }
+        catch (ConfigurationException ex)
+        {
+            throw ex;
+        }
+        catch (Exception ex)
+        {
+            throw new ConfigurationException("Error configuring back-pressure factory: " + conf.back_pressure_factory, ex);
+        }
     }
 }

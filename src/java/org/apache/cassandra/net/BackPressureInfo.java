@@ -1,7 +1,19 @@
 /*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 package org.apache.cassandra.net;
 
@@ -19,7 +31,7 @@ import org.apache.cassandra.utils.SlidingTimeRate;
  */
 class BackPressureInfo
 {
-    private final long backPressureWindowSize;
+    final long windowSize;
     final SlidingTimeRate incomingRate;
     final SlidingTimeRate outgoingRate;
     final RateLimiter outgoingLimiter;
@@ -27,11 +39,11 @@ class BackPressureInfo
     final AtomicLong lastCheck;
     final ReentrantLock lock;
 
-    BackPressureInfo(long backPressureWindowSize)
+    BackPressureInfo(long windowSize)
     {
-        this.backPressureWindowSize = backPressureWindowSize;
-        this.incomingRate = new SlidingTimeRate(this.backPressureWindowSize, 100, TimeUnit.MILLISECONDS);
-        this.outgoingRate = new SlidingTimeRate(this.backPressureWindowSize, 100, TimeUnit.MILLISECONDS);
+        this.windowSize = windowSize;
+        this.incomingRate = new SlidingTimeRate(this.windowSize, 100, TimeUnit.MILLISECONDS);
+        this.outgoingRate = new SlidingTimeRate(this.windowSize, 100, TimeUnit.MILLISECONDS);
         this.outgoingLimiter = RateLimiter.create(Double.MAX_VALUE);
         this.overload = new AtomicBoolean();
         this.lastCheck = new AtomicLong();

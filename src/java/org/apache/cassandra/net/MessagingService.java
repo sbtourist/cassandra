@@ -37,7 +37,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.RateLimiter;
 
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
@@ -348,9 +347,10 @@ public final class MessagingService implements MessagingServiceMBean
     // message sinks are a testing hook
     private final Set<IMessageSink> messageSinks = new CopyOnWriteArraySet<>();
     
-    // back-pressure window sizes
+    // back-pressure window size
     private final long backPressureWindowSize = DatabaseDescriptor.getBackPressureTimeoutOverride();
-    private final long backPressureWindowHalfSize = backPressureWindowSize / 2;
+    // back-pressure implementation
+    private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureFactory().make();
 
     private static class MSHandle
     {
@@ -459,7 +459,7 @@ public final class MessagingService implements MessagingServiceMBean
     }
     
     /**
-     * Applies back-pressure by eventually rate-limiting or returning true if overloaded.
+     * Applies back-pressure according to the configured implementation.
      * 
      * @param to The destination host to apply back-pressure to.
      * @return True if overloaded, false otherwise.
@@ -468,92 +468,11 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
-            OutboundTcpConnectionPool connectionPool = getConnectionPool(to);
-            BackPressureInfo backPressure = connectionPool.getBackPressureInfo();
-            
-            // Increase outgoing rate:
-            backPressure.outgoingRate.update(1);
-
-            RateLimiter limiter = backPressure.outgoingLimiter;
-            long lastCheck = backPressure.lastCheck.get();
-            long interval = backPressureWindowSize;
-            long now = System.currentTimeMillis();
-            
-            // Check/Update the back-pressure state at a given interval and only on a single thread:
-            if ((now - lastCheck > interval) && backPressure.lock.tryLock())
-            {
-                try
-                {
-                    // Get the incoming/outgoing rates by only looking into half the window size: we do not consider the 
-                    // full window so that we don't get biased by most recent outgoing requests that didn't receive
-                    // an incoming response *yet*; by looking at the first half of the window, we get instead a good
-                    // approximate measure of how many requests we sent and how many we've got back.
-                    double incomingRate = backPressure.incomingRate.get(
-                            TimeUnit.SECONDS.convert(backPressureWindowHalfSize, TimeUnit.MILLISECONDS), 
-                            TimeUnit.SECONDS);
-                    double outgoingRate = backPressure.outgoingRate.get(
-                            TimeUnit.SECONDS.convert(backPressureWindowHalfSize, TimeUnit.MILLISECONDS), 
-                            TimeUnit.SECONDS);
-
-                    // Now compute the incoming/outgoing ratio:
-                    double actualRatio = outgoingRate > 0 ? incomingRate / outgoingRate : 1;
-                    double highRatio = DatabaseDescriptor.getBackPressureHighRatio();
-                    double lowRatio = DatabaseDescriptor.getBackPressureLowRatio();
-                    // If the ratio is above the high mark, try growing by the back-pressure factor:
-                    if (actualRatio >= highRatio)
-                    {
-                        double newRate = limiter.getRate() + ((limiter.getRate() * DatabaseDescriptor.getBackPressureChangeFactor()) / 100);
-                        if (newRate > 0)
-                        {
-                            limiter.setRate(newRate);
-                        }
-                        backPressure.overload.set(false);
-                    }
-                    // If in between low and high marks, set the rate limiter at the incoming rate, but reduced by
-                    // the back-pressure factor to make it sustainable:
-                    else if (actualRatio >= lowRatio && actualRatio < highRatio)
-                    {
-                        limiter.setRate(incomingRate - ((incomingRate * DatabaseDescriptor.getBackPressureChangeFactor()) / 100));
-                        backPressure.overload.set(false);
-                    }
-                    // Otherwise if previously overloaded, clear the overload flag (we don't want to flood the
-                    // client with errors) and try limiting at a very reduced rate:
-                    else if (backPressure.overload.get())
-                    {
-                        limiter.setRate(outgoingRate * lowRatio);
-                        backPressure.overload.set(false);
-                    }
-                    // Finally if just below the low ratio, set the overload flag:
-                    else
-                    {
-                        backPressure.overload.set(true);
-                    }
-
-                    // Housekeeping: pruning windows and resetting the last check timestamp!
-                    backPressure.incomingRate.prune();
-                    backPressure.outgoingRate.prune();
-                    backPressure.lastCheck.set(now);
-
-                    logger.debug("Back-pressure enabled with: incoming rate {}, outgoing rate {}, ratio {}, rate limiting {}", 
-                                 incomingRate, outgoingRate, actualRatio, limiter.getRate());
-                }
-                finally
-                {
-                    backPressure.lock.unlock();
-                }
-            }
-            // If overloaded, signal back by returning true!
-            if (backPressure.overload.get())
-            {
-                return true;
-            }
-            // Otherwise rate limit:
-            limiter.acquire(1);
+            return backPressure.apply(getConnectionPool(to).getBackPressureInfo());
         }
         return false;
     }
     
-
     /**
      * Track latency information for the dynamic snitch
      *
