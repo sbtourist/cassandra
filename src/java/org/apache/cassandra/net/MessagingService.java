@@ -92,7 +92,6 @@ public final class MessagingService implements MessagingServiceMBean
     public static final int current_version = VERSION_30;
 
     public static final String FAILURE_CALLBACK_PARAM = "CAL_BAC";
-    public static final String BACKPRESSURE_SUPPORT_PARAM = "BP_SUP";
     public static final byte[] ONE_BYTE = new byte[1];
     public static final String FAILURE_RESPONSE_PARAM = "FAIL";
 
@@ -446,13 +445,14 @@ public final class MessagingService implements MessagingServiceMBean
     }
     
     /**
-     * Tracks back-pressure incoming rate if enabled and the given message supports it.
+     * Tracks back-pressure incoming rate if enabled and the given message callback supports it.
      * 
      * @param message The incoming message.
+     * @param callback The associated callback.
      */
-    public void trackBackPressure(MessageIn message)
+    public void maybeTrackBackPressure(MessageIn message, IAsyncCallback callback)
     {
-        if (DatabaseDescriptor.backPressureEnabled() && message.supportsBackPressure())
+        if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
         {
             getConnectionPool(message.from).getBackPressureInfo().incomingRate.update(1);
         }

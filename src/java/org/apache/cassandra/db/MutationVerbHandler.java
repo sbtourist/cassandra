@@ -32,9 +32,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     private void reply(int id, InetAddress replyTo)
     {
         Tracing.trace("Enqueuing response to {}", replyTo);
-        MessagingService.instance().sendReply(
-                WriteResponse.createMessage().withParameter(MessagingService.BACKPRESSURE_SUPPORT_PARAM, MessagingService.ONE_BYTE),
-                id, replyTo);
+        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, replyTo);
     }
 
     private void failed()

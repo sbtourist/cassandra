@@ -32,8 +32,8 @@ public final class HintResponse
     public static final IVersionedSerializer<HintResponse> serializer = new Serializer();
 
     static final HintResponse instance = new HintResponse();
-    static final MessageOut<HintResponse> message = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, instance, serializer)
-            .withParameter(MessagingService.BACKPRESSURE_SUPPORT_PARAM, MessagingService.ONE_BYTE);
+    static final MessageOut<HintResponse> message = 
+            new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, instance, serializer);
 
     private HintResponse()
     {
