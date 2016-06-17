@@ -1193,7 +1193,7 @@ public class StorageProxy implements StorageProxyMBean
         for (InetAddress destination : targets)
         {
             checkHintOverload(destination);
-            checkBackPressureOverload(destination);
+            applyBackPressure(destination);
 
             if (FailureDetector.instance.isAlive(destination))
             {
@@ -1271,7 +1271,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
     
-    private static void checkBackPressureOverload(InetAddress destination)
+    private static void applyBackPressure(InetAddress destination)
     {
         if (!destination.equals(FBUtilities.getBroadcastAddress()))
         {
