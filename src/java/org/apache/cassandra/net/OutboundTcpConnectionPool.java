@@ -49,8 +49,11 @@ public class OutboundTcpConnectionPool
     // pointer to the reset Address.
     private InetAddress resetEndpoint;
     private ConnectionMetrics metrics;
+    
+    // back-pressure state linked to this connection:
+    private final BackPressureInfo backPressureInfo;
 
-    OutboundTcpConnectionPool(InetAddress remoteEp)
+    OutboundTcpConnectionPool(InetAddress remoteEp, long backPressureWindowSize)
     {
         id = remoteEp;
         resetEndpoint = SystemKeyspace.getPreferredIP(remoteEp);
@@ -59,6 +62,8 @@ public class OutboundTcpConnectionPool
         smallMessages = new OutboundTcpConnection(this);
         largeMessages = new OutboundTcpConnection(this);
         gossipMessages = new OutboundTcpConnection(this);
+        
+        backPressureInfo = new BackPressureInfo(backPressureWindowSize);
     }
 
     /**
@@ -72,6 +77,11 @@ public class OutboundTcpConnectionPool
         return msg.payloadSize(smallMessages.getTargetVersion()) > LARGE_MESSAGE_THRESHOLD
                ? largeMessages
                : smallMessages;
+    }
+
+    public BackPressureInfo getBackPressureInfo()
+    {
+        return backPressureInfo;
     }
 
     void reset()

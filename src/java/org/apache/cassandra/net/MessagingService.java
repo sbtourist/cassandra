@@ -24,14 +24,10 @@ import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.ClosedChannelException;
 import java.nio.channels.ServerSocketChannel;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReentrantLock;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -355,8 +351,6 @@ public final class MessagingService implements MessagingServiceMBean
     // back-pressure window sizes
     private final long backPressureWindowSize = DatabaseDescriptor.getBackPressureTimeoutOverride();
     private final long backPressureWindowHalfSize = backPressureWindowSize / 2;
-    // back-pressure info per replica
-    private final ConcurrentMap<InetAddress, BackPressureInfo> backPressureInfos = new ConcurrentHashMap<>();
 
     private static class MSHandle
     {
@@ -460,7 +454,7 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (DatabaseDescriptor.backPressureEnabled() && message.supportsBackPressure())
         {
-            backPressureInfos.get(message.from).incomingRate.update(1);
+            getConnectionPool(message.from).getBackPressureInfo().incomingRate.update(1);
         }
     }
     
@@ -474,18 +468,19 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
-            // Initialize the connection pool and related backpressure:
-            getConnectionPool(to);
+            OutboundTcpConnectionPool connectionPool = getConnectionPool(to);
+            BackPressureInfo backPressure = connectionPool.getBackPressureInfo();
+            
             // Increase outgoing rate:
-            backPressureInfos.get(to).outgoingRate.update(1);
+            backPressure.outgoingRate.update(1);
 
-            RateLimiter limiter = backPressureInfos.get(to).outgoingLimiter;
-            ReentrantLock lock = backPressureInfos.get(to).lock;
-            long lastCheck = backPressureInfos.get(to).lastCheck.get();
+            RateLimiter limiter = backPressure.outgoingLimiter;
+            long lastCheck = backPressure.lastCheck.get();
             long interval = backPressureWindowSize;
             long now = System.currentTimeMillis();
+            
             // Check/Update the back-pressure state at a given interval and only on a single thread:
-            if ((now - lastCheck > interval) && lock.tryLock())
+            if ((now - lastCheck > interval) && backPressure.lock.tryLock())
             {
                 try
                 {
@@ -493,10 +488,10 @@ public final class MessagingService implements MessagingServiceMBean
                     // full window so that we don't get biased by most recent outgoing requests that didn't receive
                     // an incoming response *yet*; by looking at the first half of the window, we get instead a good
                     // approximate measure of how many requests we sent and how many we've got back.
-                    double incomingRate = backPressureInfos.get(to).incomingRate.get(
+                    double incomingRate = backPressure.incomingRate.get(
                             TimeUnit.SECONDS.convert(backPressureWindowHalfSize, TimeUnit.MILLISECONDS), 
                             TimeUnit.SECONDS);
-                    double outgoingRate = backPressureInfos.get(to).outgoingRate.get(
+                    double outgoingRate = backPressure.outgoingRate.get(
                             TimeUnit.SECONDS.convert(backPressureWindowHalfSize, TimeUnit.MILLISECONDS), 
                             TimeUnit.SECONDS);
 
@@ -512,43 +507,43 @@ public final class MessagingService implements MessagingServiceMBean
                         {
                             limiter.setRate(newRate);
                         }
-                        backPressureInfos.get(to).overload.set(false);
+                        backPressure.overload.set(false);
                     }
                     // If in between low and high marks, set the rate limiter at the incoming rate, but reduced by
                     // the back-pressure factor to make it sustainable:
                     else if (actualRatio >= lowRatio && actualRatio < highRatio)
                     {
                         limiter.setRate(incomingRate - ((incomingRate * DatabaseDescriptor.getBackPressureChangeFactor()) / 100));
-                        backPressureInfos.get(to).overload.set(false);
+                        backPressure.overload.set(false);
                     }
                     // Otherwise if previously overloaded, clear the overload flag (we don't want to flood the
                     // client with errors) and try limiting at a very reduced rate:
-                    else if (backPressureInfos.get(to).overload.get())
+                    else if (backPressure.overload.get())
                     {
                         limiter.setRate(outgoingRate * lowRatio);
-                        backPressureInfos.get(to).overload.set(false);
+                        backPressure.overload.set(false);
                     }
                     // Finally if just below the low ratio, set the overload flag:
                     else
                     {
-                        backPressureInfos.get(to).overload.set(true);
+                        backPressure.overload.set(true);
                     }
 
                     // Housekeeping: pruning windows and resetting the last check timestamp!
-                    backPressureInfos.get(to).incomingRate.prune();
-                    backPressureInfos.get(to).outgoingRate.prune();
-                    backPressureInfos.get(to).lastCheck.set(now);
+                    backPressure.incomingRate.prune();
+                    backPressure.outgoingRate.prune();
+                    backPressure.lastCheck.set(now);
 
                     logger.debug("Back-pressure enabled with: incoming rate {}, outgoing rate {}, ratio {}, rate limiting {}", 
                                  incomingRate, outgoingRate, actualRatio, limiter.getRate());
                 }
                 finally
                 {
-                    lock.unlock();
+                    backPressure.lock.unlock();
                 }
             }
             // If overloaded, signal back by returning true!
-            if (backPressureInfos.get(to).overload.get())
+            if (backPressure.overload.get())
             {
                 return true;
             }
@@ -558,16 +553,6 @@ public final class MessagingService implements MessagingServiceMBean
         return false;
     }
     
-    // The back-pressure state, tracked per replica host:
-    private class BackPressureInfo
-    {
-        final SlidingTimeRate incomingRate = new SlidingTimeRate(backPressureWindowSize, 100, TimeUnit.MILLISECONDS);
-        final SlidingTimeRate outgoingRate = new SlidingTimeRate(backPressureWindowSize, 100, TimeUnit.MILLISECONDS);
-        final RateLimiter outgoingLimiter = RateLimiter.create(Double.MAX_VALUE);
-        final AtomicBoolean overload = new AtomicBoolean();
-        final AtomicLong lastCheck = new AtomicLong();
-        final ReentrantLock lock = new ReentrantLock();
-    }
 
     /**
      * Track latency information for the dynamic snitch
@@ -716,7 +701,6 @@ public final class MessagingService implements MessagingServiceMBean
             return;
         cp.close();
         connectionManagers.remove(to);
-        backPressureInfos.remove(to);
     }
 
     public OutboundTcpConnectionPool getConnectionPool(InetAddress to)
@@ -724,15 +708,12 @@ public final class MessagingService implements MessagingServiceMBean
         OutboundTcpConnectionPool cp = connectionManagers.get(to);
         if (cp == null)
         {
-            cp = new OutboundTcpConnectionPool(to);
+            cp = new OutboundTcpConnectionPool(to, backPressureWindowSize);
             OutboundTcpConnectionPool existingPool = connectionManagers.putIfAbsent(to, cp);
             if (existingPool != null)
                 cp = existingPool;
             else
-            {
-                backPressureInfos.put(to, new BackPressureInfo());
                 cp.start();
-            }
         }
         cp.waitForStarted();
         return cp;
