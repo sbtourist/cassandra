@@ -25,7 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Back-pressure algorithm based on the ration between incoming and outgoing rates, and low/high watermarks.
+ * Back-pressure algorithm based on the ratio between incoming and outgoing rates, and low/high watermarks.
  */
 public class RateBasedBackPressure implements BackPressureStrategy
 {
@@ -34,8 +34,16 @@ public class RateBasedBackPressure implements BackPressureStrategy
     private final double lowRatio;
     private final int factor;
 
-    public RateBasedBackPressure(double highRatio, double lowRatio, int factor)
+    public RateBasedBackPressure(String[] args)
     {
+        if (args.length != 3)
+            throw new IllegalArgumentException(RateBasedBackPressure.class.getCanonicalName()
+                    + " requires 3 arguments: high ratio, low ratio, back-pressure factor.");
+        
+        highRatio = Double.parseDouble(args[0].trim());
+        lowRatio = Double.parseDouble(args[1].trim());
+        factor = Integer.parseInt(args[2].trim());
+        
         if (highRatio <= 0 || highRatio > 1)
             throw new IllegalArgumentException("Back-pressure high ratio must be > 0 and <= 1");
         if (lowRatio <= 0 || lowRatio > 1)
@@ -44,9 +52,6 @@ public class RateBasedBackPressure implements BackPressureStrategy
             throw new IllegalArgumentException("Back-pressure low ratio must be smaller than high ratio");
         if (factor < 1)
             throw new IllegalArgumentException("Back-pressure factor must be >= 1");
-        this.highRatio = highRatio;
-        this.lowRatio = lowRatio;
-        this.factor = factor;
     }
 
     @Override
@@ -131,29 +136,5 @@ public class RateBasedBackPressure implements BackPressureStrategy
         // Otherwise rate limit:
         limiter.acquire(1);
         return false;
-    }
-
-    public static class Factory implements BackPressureStrategy.Factory
-    {
-        private final String[] args;
-
-        public Factory(String[] args)
-        {
-            if (args.length != 3)
-            {
-                throw new IllegalArgumentException(RateBasedBackPressure.class.getCanonicalName()
-                        + " requires 3 arguments: high ratio, low ratio, back-pressure factor.");
-            }
-
-            this.args = args;
-        }
-
-        @Override
-        public BackPressureStrategy make()
-        {
-            return new RateBasedBackPressure(Double.parseDouble(args[0].trim()),
-                                             Double.parseDouble(args[1].trim()),
-                                             Integer.parseInt(args[2].trim()));
-        }
     }
 }

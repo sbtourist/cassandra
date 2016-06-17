@@ -349,7 +349,7 @@ public final class MessagingService implements MessagingServiceMBean
     // back-pressure window size
     private final long backPressureWindowSize = DatabaseDescriptor.getBackPressureTimeoutOverride();
     // back-pressure implementation
-    private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureFactory().make();
+    private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();
 
     private static class MSHandle
     {

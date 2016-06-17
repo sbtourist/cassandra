@@ -23,9 +23,4 @@ package org.apache.cassandra.net;
 public interface BackPressureStrategy
 {
     boolean apply(BackPressureInfo backPressureInfo);
-
-    interface Factory
-    {
-        BackPressureStrategy make();
-    }
 }

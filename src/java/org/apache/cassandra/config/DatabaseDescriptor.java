@@ -2000,27 +2000,27 @@ public class DatabaseDescriptor
         return conf.back_pressure_timeout_override;
     }
 
-    public static BackPressureStrategy.Factory getBackPressureFactory()
+    public static BackPressureStrategy getBackPressureStrategy()
     {
         try
         {
             Pattern pattern = Pattern.compile("(.+)\\((.+)\\)");
-            Matcher matcher = pattern.matcher(conf.back_pressure_factory);
+            Matcher matcher = pattern.matcher(conf.back_pressure_strategy);
             if (matcher.find())
             {
-                String factory = matcher.group(1);
+                String strategy = matcher.group(1);
                 String[] arguments = matcher.group(2).split(",");
 
-                Class<?> clazz = Class.forName(factory);
-                if (!BackPressureStrategy.Factory.class.isAssignableFrom(clazz))
-                    throw new ConfigurationException(factory + " is not an instance of " + BackPressureStrategy.Factory.class.getCanonicalName(), false);
+                Class<?> clazz = Class.forName(strategy);
+                if (!BackPressureStrategy.class.isAssignableFrom(clazz))
+                    throw new ConfigurationException(strategy + " is not an instance of " + BackPressureStrategy.class.getCanonicalName(), false);
 
                 Constructor<?> ctor = clazz.getConstructor(String[].class);
-                BackPressureStrategy.Factory instance = (BackPressureStrategy.Factory) ctor.newInstance((Object) arguments);
-                logger.info("Back-pressure is {} with implementation {}.", backPressureEnabled() ? "enabled" : "disabled", conf.back_pressure_factory);
+                BackPressureStrategy instance = (BackPressureStrategy) ctor.newInstance((Object) arguments);
+                logger.info("Back-pressure is {} with strategy {}.", backPressureEnabled() ? "enabled" : "disabled", conf.back_pressure_strategy);
                 return instance;
             }
-            throw new ConfigurationException("Wrong back-pressure factory configuration: " + conf.back_pressure_factory, false);
+            throw new ConfigurationException("Wrong back-pressure strategy configuration: " + conf.back_pressure_strategy, false);
         }
         catch (ConfigurationException ex)
         {
@@ -2028,7 +2028,7 @@ public class DatabaseDescriptor
         }
         catch (Exception ex)
         {
-            throw new ConfigurationException("Error configuring back-pressure factory: " + conf.back_pressure_factory, ex);
+            throw new ConfigurationException("Error configuring back-pressure strategy: " + conf.back_pressure_strategy, ex);
         }
     }
 }
