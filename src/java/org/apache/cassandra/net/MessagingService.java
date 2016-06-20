@@ -1249,6 +1249,27 @@ public final class MessagingService implements MessagingServiceMBean
         }
         return result;
     }
+    
+    public Map<String, Double> getBackPressurePerHost()
+    {
+        Map<String, Double> map = new HashMap<>(connectionManagers.size());
+        for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
+            map.put(entry.getKey().getHostAddress(), entry.getValue().getBackPressureInfo().outgoingLimiter.getRate());
+
+        return map;
+    }
+
+    @Override
+    public void setBackPressureEnabled(boolean enabled)
+    {
+        DatabaseDescriptor.setBackPressureEnabled(enabled);
+    }
+
+    @Override
+    public boolean isBackPressureEnabled()
+    {
+        return DatabaseDescriptor.backPressureEnabled();
+    }
 
     public static IPartitioner globalPartitioner()
     {
