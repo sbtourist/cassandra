@@ -468,7 +468,9 @@ public final class MessagingService implements MessagingServiceMBean
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
-            return backPressure.apply(getConnectionPool(to).getBackPressureInfo());
+            BackPressureInfo backPressureInfo = getConnectionPool(to).getBackPressureInfo();
+            backPressure.apply(backPressureInfo);
+            return backPressureInfo.overload.get();
         }
         return false;
     }

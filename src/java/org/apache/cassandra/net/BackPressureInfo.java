@@ -22,12 +22,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.apache.cassandra.utils.SlidingTimeRate;
+import org.apache.cassandra.utils.SystemTimeSource;
+import org.apache.cassandra.utils.TimeSource;
 
 /**
- * The back-pressure state, tracked per replica host:
+ * The back-pressure state, tracked per replica host.
  */
 class BackPressureInfo
 {
@@ -38,13 +41,19 @@ class BackPressureInfo
     final AtomicBoolean overload;
     final AtomicLong lastCheck;
     final ReentrantLock lock;
-
+    
     BackPressureInfo(long windowSize)
     {
+        this(new SystemTimeSource(), windowSize);
+    }
+
+    @VisibleForTesting
+    BackPressureInfo(TimeSource timeSource, long windowSize)
+    {
         this.windowSize = windowSize;
-        this.incomingRate = new SlidingTimeRate(this.windowSize, 100, TimeUnit.MILLISECONDS);
-        this.outgoingRate = new SlidingTimeRate(this.windowSize, 100, TimeUnit.MILLISECONDS);
-        this.outgoingLimiter = RateLimiter.create(Double.MAX_VALUE);
+        this.incomingRate = new SlidingTimeRate(timeSource, this.windowSize, 100, TimeUnit.MILLISECONDS);
+        this.outgoingRate = new SlidingTimeRate(timeSource, this.windowSize, 100, TimeUnit.MILLISECONDS);
+        this.outgoingLimiter = RateLimiter.create(Double.POSITIVE_INFINITY);
         this.overload = new AtomicBoolean();
         this.lastCheck = new AtomicLong();
         this.lock = new ReentrantLock();

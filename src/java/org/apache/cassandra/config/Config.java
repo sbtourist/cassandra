@@ -330,8 +330,8 @@ public class Config
     public UserFunctionTimeoutPolicy user_function_timeout_policy = UserFunctionTimeoutPolicy.die;
     
     public volatile boolean back_pressure_enabled = false;
-    public long back_pressure_timeout_override = 5000;
-    public String back_pressure_strategy = String.format("%s(%s,%s,%s)",
+    public volatile long back_pressure_timeout_override = 5000;
+    public volatile String back_pressure_strategy = String.format("%s(%s,%s,%s)",
                                                         RateBasedBackPressure.class.getName(),
                                                         BACK_PRESSURE_HIGH_RATIO,
                                                         BACK_PRESSURE_LOW_RATIO,

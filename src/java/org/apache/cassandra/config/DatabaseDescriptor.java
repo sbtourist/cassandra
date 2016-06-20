@@ -1999,12 +1999,18 @@ public class DatabaseDescriptor
     {
         return conf.back_pressure_timeout_override;
     }
+    
+    @VisibleForTesting
+    public static void setBackPressureStrategy(String strategy)
+    {
+        conf.back_pressure_strategy = strategy;
+    }
 
     public static BackPressureStrategy getBackPressureStrategy()
     {
         try
         {
-            Pattern pattern = Pattern.compile("(.+)\\((.+)\\)");
+            Pattern pattern = Pattern.compile("(.+)\\((.*)\\)");
             Matcher matcher = pattern.matcher(conf.back_pressure_strategy);
             if (matcher.find())
             {
