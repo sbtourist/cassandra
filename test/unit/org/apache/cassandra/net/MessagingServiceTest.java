@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -26,6 +27,12 @@ public class MessagingServiceTest
         messagingService = MessagingService.test();
     }
 
+    @Before
+    public void before() throws UnknownHostException
+    {
+        messagingService.destroyConnectionPool(InetAddress.getLocalHost());
+    }
+    
     @Test
     public void testDroppedMessages()
     {
@@ -75,14 +82,31 @@ public class MessagingServiceTest
     public void testOnlyAppliesBackPressureWhenEnabled() throws UnknownHostException
     {
         MessageIn<String> message = MessageIn.create(InetAddress.getLocalHost(), "", Collections.emptyMap(), MessagingService.Verb.MUTATION, MessagingService.current_version);
-
+        BackPressureInfo backPressureInfo = messagingService.getConnectionPool(message.from).getBackPressureInfo();
+        
         DatabaseDescriptor.setBackPressureEnabled(false);
         messagingService.applyBackPressure(message.from);
         assertFalse(MockBackPressureStrategy.applied);
+        assertEquals(0.0, backPressureInfo.outgoingRate.get(TimeUnit.SECONDS), 0.0);
 
         DatabaseDescriptor.setBackPressureEnabled(true);
         messagingService.applyBackPressure(message.from);
         assertTrue(MockBackPressureStrategy.applied);
+        assertEquals(1.0, backPressureInfo.outgoingRate.get(TimeUnit.SECONDS), 0.0);
+    }
+    
+    @Test
+    public void testDoesntIncrementOutgoingRateWhenOverloaded() throws UnknownHostException
+    {
+        MessageIn<String> message = MessageIn.create(InetAddress.getLocalHost(), "", Collections.emptyMap(), MessagingService.Verb.MUTATION, MessagingService.current_version);
+        BackPressureInfo backPressureInfo = messagingService.getConnectionPool(message.from).getBackPressureInfo();
+        
+        backPressureInfo.overload.set(true);
+
+        DatabaseDescriptor.setBackPressureEnabled(true);
+        messagingService.applyBackPressure(message.from);
+        assertTrue(MockBackPressureStrategy.applied);
+        assertEquals(0.0, backPressureInfo.outgoingRate.get(TimeUnit.SECONDS), 0.0);
     }
     
     public static class MockBackPressureStrategy implements BackPressureStrategy

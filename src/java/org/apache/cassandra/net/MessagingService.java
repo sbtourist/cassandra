@@ -459,7 +459,7 @@ public final class MessagingService implements MessagingServiceMBean
     }
     
     /**
-     * Applies back-pressure according to the configured implementation.
+     * Applies back-pressure according to the configured strategy.
      * 
      * @param to The destination host to apply back-pressure to.
      * @return True if overloaded, false otherwise.
@@ -470,8 +470,13 @@ public final class MessagingService implements MessagingServiceMBean
         {
             BackPressureInfo backPressureInfo = getConnectionPool(to).getBackPressureInfo();
             backPressure.apply(backPressureInfo);
-            return backPressureInfo.overload.get();
+            boolean overloaded =  backPressureInfo.overload.get();
+            if (!overloaded)
+                backPressureInfo.outgoingRate.update(1);
+            
+            return overloaded;
         }
+        
         return false;
     }
     

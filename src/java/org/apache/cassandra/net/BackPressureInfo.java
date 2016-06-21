@@ -31,6 +31,18 @@ import org.apache.cassandra.utils.TimeSource;
 
 /**
  * The back-pressure state, tracked per replica host.
+ * <br/>
+ * This is meant to be read and mutated by {@link MessagingService} and {@link BackPressureStrategy} implementations, 
+ * and provides the following back-pressure attributes:
+ * <ul>
+ * <li>windowSize: the length of the back-pressure window in milliseconds (as set by {@link MessagingService}).</li>
+ * <li>incomingRate: the rate of back-pressure supporting incoming messages (updated by {@link MessagingService}).</li>
+ * <li>outgoingRate: the rate of back-pressure supporting outgoing messages (updated by {@link MessagingService}).</li>
+ * <li>overload: a boolean flag to notify {@link MessagingService} the destination replica host is overloaded (updated by {@link BackPressureStrategy}).</li>
+ * <li>outgoingLimiter: the rate limiter to eventually apply to outgoing messages (updated by {@link BackPressureStrategy}).</li>
+ * <li>lastCheck: the timestamp of the last back-pressure check (updated by {@link BackPressureStrategy}).</li>
+ * <li>lock: a reentrant lock to guard against concurrent modifications of this state (used by {@link BackPressureStrategy}).</li>
+ * </ul>
  */
 class BackPressureInfo
 {

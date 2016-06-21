@@ -151,11 +151,9 @@ public class RateBasedBackPressure implements BackPressureStrategy
             }
         }
 
+        // At this point we're either overloaded or rate limited:
         if (!backPressure.overload.get())
         {
-            // Increase outgoing rate:
-            backPressure.outgoingRate.update(1);
-            // Rate limit:
             limiter.acquire(1);
         }
     }

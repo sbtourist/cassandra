@@ -18,9 +18,14 @@
 package org.apache.cassandra.net;
 
 /**
- * Back-pressure algorithm interface.
+ * Back-pressure algorithm interface. 
+ * <br/>
+ * For experts usage only.
  */
 public interface BackPressureStrategy
 {
+    /**
+     * Applies the back-pressure algorithm, based and acting on the given {@link BackPressureInfo}.
+     */
     void apply(BackPressureInfo backPressureInfo);
 }
