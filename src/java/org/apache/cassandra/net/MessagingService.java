@@ -346,7 +346,7 @@ public final class MessagingService implements MessagingServiceMBean
     // message sinks are a testing hook
     private final Set<IMessageSink> messageSinks = new CopyOnWriteArraySet<>();
     
-    // back-pressure window size
+    // back-pressure window size is equal to the back-pressure write timeout
     private final long backPressureWindowSize = DatabaseDescriptor.getBackPressureTimeoutOverride();
     // back-pressure implementation
     private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();
@@ -445,34 +445,34 @@ public final class MessagingService implements MessagingServiceMBean
     }
     
     /**
-     * Tracks back-pressure incoming rate if enabled and the given message callback supports it.
+     * Updates the back-pressure state for the given host if enabled and the given message callback supports it.
      * 
-     * @param message The incoming message.
-     * @param callback The associated callback.
+     * @param host The replica host the back-pressure state refers to.
+     * @param callback The message callback.
      */
-    public void maybeTrackBackPressure(MessageIn message, IAsyncCallback callback)
+    public void updateBackPressureState(InetAddress host, IAsyncCallback callback)
     {
         if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
         {
-            getConnectionPool(message.from).getBackPressureInfo().incomingRate.update(1);
+            getConnectionPool(host).getBackPressureState().incomingRate.update(1);
         }
     }
     
     /**
-     * Applies back-pressure according to the configured strategy.
+     * Applies back-pressure for teh given host, according to the configured strategy.
      * 
-     * @param to The destination host to apply back-pressure to.
+     * @param host The destination host to apply back-pressure to.
      * @return True if overloaded, false otherwise.
      */
-    public boolean applyBackPressure(InetAddress to)
+    public boolean applyBackPressure(InetAddress host)
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
-            BackPressureInfo backPressureInfo = getConnectionPool(to).getBackPressureInfo();
-            backPressure.apply(backPressureInfo);
-            boolean overloaded =  backPressureInfo.overload.get();
+            BackPressureState state = getConnectionPool(host).getBackPressureState();
+            backPressure.apply(state);
+            boolean overloaded =  state.overload.get();
             if (!overloaded)
-                backPressureInfo.outgoingRate.update(1);
+                state.outgoingRate.update(1);
             
             return overloaded;
         }
@@ -1261,7 +1261,7 @@ public final class MessagingService implements MessagingServiceMBean
     {
         Map<String, Double> map = new HashMap<>(connectionManagers.size());
         for (Map.Entry<InetAddress, OutboundTcpConnectionPool> entry : connectionManagers.entrySet())
-            map.put(entry.getKey().getHostAddress(), entry.getValue().getBackPressureInfo().outgoingLimiter.getRate());
+            map.put(entry.getKey().getHostAddress(), entry.getValue().getBackPressureState().outgoingLimiter.getRate());
 
         return map;
     }

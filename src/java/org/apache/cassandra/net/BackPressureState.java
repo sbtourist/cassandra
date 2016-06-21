@@ -31,43 +31,69 @@ import org.apache.cassandra.utils.TimeSource;
 
 /**
  * The back-pressure state, tracked per replica host.
- * <br/>
- * This is meant to be read and mutated by {@link MessagingService} and {@link BackPressureStrategy} implementations, 
- * and provides the following back-pressure attributes:
+ * <br/><br/>
+ * 
+ * The back-pressure state is made up of the following attributes:
  * <ul>
  * <li>windowSize: the length of the back-pressure window in milliseconds (as set by {@link MessagingService}).</li>
- * <li>incomingRate: the rate of back-pressure supporting incoming messages (updated by {@link MessagingService}).</li>
- * <li>outgoingRate: the rate of back-pressure supporting outgoing messages (updated by {@link MessagingService}).</li>
- * <li>overload: a boolean flag to notify {@link MessagingService} the destination replica host is overloaded (updated by {@link BackPressureStrategy}).</li>
- * <li>outgoingLimiter: the rate limiter to eventually apply to outgoing messages (updated by {@link BackPressureStrategy}).</li>
- * <li>lastCheck: the timestamp of the last back-pressure check (updated by {@link BackPressureStrategy}).</li>
- * <li>lock: a reentrant lock to guard against concurrent modifications of this state (used by {@link BackPressureStrategy}).</li>
+ * <li>incomingRate: the rate of back-pressure supporting incoming messages (as updated by {@link MessagingService}).</li>
+ * <li>outgoingRate: the rate of back-pressure supporting outgoing messages (as updated by {@link MessagingService}).</li>
+ * <li>overload: a boolean flag to notify {@link MessagingService} the destination replica host is overloaded (as updated
+ * by {@link BackPressureStrategy}).</li>
+ * <li>outgoingLimiter: the rate limiter to eventually apply to outgoing messages (as updated by {@link BackPressureStrategy}).</li>
  * </ul>
+ * 
+ * It also provides methods to exclusively acquire/release back-pressure windows: a back-pressure window can be acquired
+ * only each "window size" intervals, and only by a single thread; this allows {@link BackPressureStrategy} implementations
+ * to apply back-pressure only when its window has passed, and avoids concurrent modifications.
  */
-class BackPressureInfo
+class BackPressureState
 {
+    private final AtomicLong lastAcquire;
+    private final ReentrantLock acquireLock;
+    private final TimeSource timeSource;
     final long windowSize;
     final SlidingTimeRate incomingRate;
     final SlidingTimeRate outgoingRate;
     final RateLimiter outgoingLimiter;
     final AtomicBoolean overload;
-    final AtomicLong lastCheck;
-    final ReentrantLock lock;
-    
-    BackPressureInfo(long windowSize)
+
+    BackPressureState(long windowSize)
     {
         this(new SystemTimeSource(), windowSize);
     }
 
     @VisibleForTesting
-    BackPressureInfo(TimeSource timeSource, long windowSize)
+    BackPressureState(TimeSource timeSource, long windowSize)
     {
+        this.timeSource = timeSource;
         this.windowSize = windowSize;
+        this.lastAcquire = new AtomicLong();
+        this.acquireLock = new ReentrantLock();
         this.incomingRate = new SlidingTimeRate(timeSource, this.windowSize, 100, TimeUnit.MILLISECONDS);
         this.outgoingRate = new SlidingTimeRate(timeSource, this.windowSize, 100, TimeUnit.MILLISECONDS);
         this.outgoingLimiter = RateLimiter.create(Double.POSITIVE_INFINITY);
         this.overload = new AtomicBoolean();
-        this.lastCheck = new AtomicLong();
-        this.lock = new ReentrantLock();
+    }
+
+    boolean tryAcquireNewWindow()
+    {
+        long now = timeSource.currentTimeMillis();
+        boolean acquired = (now - lastAcquire.get() >= windowSize) && acquireLock.tryLock();
+        if (acquired)
+            lastAcquire.set(now);
+        
+        return acquired;
+    }
+
+    void releaseWindow()
+    {
+        acquireLock.unlock();
+    }
+
+    @VisibleForTesting
+    public long getLastAcquire()
+    {
+        return lastAcquire.get();
     }
 }

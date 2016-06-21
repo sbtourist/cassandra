@@ -19,33 +19,22 @@ package org.apache.cassandra.net;
 
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.utils.SystemTimeSource;
-import org.apache.cassandra.utils.TimeSource;
-
 /**
- * Back-pressure algorithm based on the ratio between incoming and outgoing rates, and low/high watermarks.
+ * Back-pressure algorithm based on rate limiting according to the ratio between incoming and outgoing rates.
  */
 public class RateBasedBackPressure implements BackPressureStrategy
 {
     private static final Logger logger = LoggerFactory.getLogger(RateBasedBackPressure.class);
-    private final TimeSource timeSource;
     private final double highRatio;
     private final double lowRatio;
     private final int factor;
     
     public RateBasedBackPressure(String[] args)
-    {
-        this(args, new SystemTimeSource());
-    }
-
-    @VisibleForTesting
-    public RateBasedBackPressure(String[] args, TimeSource timeSource)
     {
         if (args.length != 3)
             throw new IllegalArgumentException(RateBasedBackPressure.class.getCanonicalName()
@@ -69,23 +58,16 @@ public class RateBasedBackPressure implements BackPressureStrategy
         if (highRatio <= lowRatio)
             throw new IllegalArgumentException("Back-pressure low ratio must be smaller than high ratio");
         if (factor < 1)
-            throw new IllegalArgumentException("Back-pressure factor must be >= 1");
-        
-        this.timeSource = timeSource;
+            throw new IllegalArgumentException("Back-pressure factor must be >= 1");        
     }
 
     @Override
-    public void apply(BackPressureInfo backPressure)
+    public void apply(BackPressureState backPressure)
     {        
         RateLimiter limiter = backPressure.outgoingLimiter;
         long backPressureWindowHalfSize = backPressure.windowSize / 2;
 
-        long lastCheck = backPressure.lastCheck.get();
-        long interval = backPressure.windowSize;
-        long now = timeSource.currentTimeMillis();
-
-        // Check/Update the back-pressure state at a given interval and only on a single thread:
-        if ((now - lastCheck >= interval) && backPressure.lock.tryLock())
+        if (backPressure.tryAcquireNewWindow())
         {
             try
             {
@@ -140,14 +122,13 @@ public class RateBasedBackPressure implements BackPressureStrategy
                 // Housekeeping: pruning windows and resetting the last check timestamp!
                 backPressure.incomingRate.prune();
                 backPressure.outgoingRate.prune();
-                backPressure.lastCheck.set(now);
 
                 logger.debug("Back-pressure enabled with: incoming rate {}, outgoing rate {}, ratio {}, rate limiting {}",
                              incomingRate, outgoingRate, actualRatio, limiter.getRate());
             }
             finally
             {
-                backPressure.lock.unlock();
+                backPressure.releaseWindow();
             }
         }
 

@@ -51,7 +51,7 @@ public class OutboundTcpConnectionPool
     private ConnectionMetrics metrics;
     
     // back-pressure state linked to this connection:
-    private final BackPressureInfo backPressureInfo;
+    private final BackPressureState backPressureState;
 
     OutboundTcpConnectionPool(InetAddress remoteEp, long backPressureWindowSize)
     {
@@ -63,7 +63,7 @@ public class OutboundTcpConnectionPool
         largeMessages = new OutboundTcpConnection(this);
         gossipMessages = new OutboundTcpConnection(this);
         
-        backPressureInfo = new BackPressureInfo(backPressureWindowSize);
+        backPressureState = new BackPressureState(backPressureWindowSize);
     }
 
     /**
@@ -79,9 +79,9 @@ public class OutboundTcpConnectionPool
                : smallMessages;
     }
 
-    public BackPressureInfo getBackPressureInfo()
+    public BackPressureState getBackPressureState()
     {
-        return backPressureInfo;
+        return backPressureState;
     }
 
     void reset()

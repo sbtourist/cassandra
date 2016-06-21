@@ -2,7 +2,6 @@ package org.apache.cassandra.net;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -28,9 +27,9 @@ public class MessagingServiceTest
     }
 
     @Before
-    public void before() throws UnknownHostException
+    public void before()
     {
-        messagingService.destroyConnectionPool(InetAddress.getLocalHost());
+        messagingService.destroyConnectionPool(InetAddress.getLoopbackAddress());
     }
     
     @Test
@@ -58,55 +57,52 @@ public class MessagingServiceTest
     }
 
     @Test
-    public void testOnlyTracksBackPressureWhenEnabledAndWithSupportedCallback() throws UnknownHostException
+    public void testUpdatesBackPressureStateWhenEnabledAndWithSupportedCallback()
     {
-        MessageIn<String> message = MessageIn.create(InetAddress.getLocalHost(), "", Collections.emptyMap(), MessagingService.Verb.MUTATION, MessagingService.current_version);
-        BackPressureInfo backPressureInfo = messagingService.getConnectionPool(message.from).getBackPressureInfo();
+        BackPressureState backPressureState = messagingService.getConnectionPool(InetAddress.getLoopbackAddress()).getBackPressureState();
         IAsyncCallback bpCallback = new BackPressureCallback();
         IAsyncCallback noCallback = new NoBackPressureCallback();
 
         DatabaseDescriptor.setBackPressureEnabled(true);
-        messagingService.maybeTrackBackPressure(message, noCallback);
-        assertEquals(0.0, backPressureInfo.incomingRate.get(TimeUnit.SECONDS), 0.0);
+        messagingService.updateBackPressureState(InetAddress.getLoopbackAddress(), noCallback);
+        assertEquals(0.0, backPressureState.incomingRate.get(TimeUnit.SECONDS), 0.0);
 
         DatabaseDescriptor.setBackPressureEnabled(false);
-        messagingService.maybeTrackBackPressure(message, bpCallback);
-        assertEquals(0.0, backPressureInfo.incomingRate.get(TimeUnit.SECONDS), 0.0);
+        messagingService.updateBackPressureState(InetAddress.getLoopbackAddress(), bpCallback);
+        assertEquals(0.0, backPressureState.incomingRate.get(TimeUnit.SECONDS), 0.0);
 
         DatabaseDescriptor.setBackPressureEnabled(true);
-        messagingService.maybeTrackBackPressure(message, bpCallback);
-        assertEquals(1.0, backPressureInfo.incomingRate.get(TimeUnit.SECONDS), 0.0);
+        messagingService.updateBackPressureState(InetAddress.getLoopbackAddress(), bpCallback);
+        assertEquals(1.0, backPressureState.incomingRate.get(TimeUnit.SECONDS), 0.0);
     }
 
     @Test
-    public void testOnlyAppliesBackPressureWhenEnabled() throws UnknownHostException
+    public void testAppliesBackPressureWhenEnabled()
     {
-        MessageIn<String> message = MessageIn.create(InetAddress.getLocalHost(), "", Collections.emptyMap(), MessagingService.Verb.MUTATION, MessagingService.current_version);
-        BackPressureInfo backPressureInfo = messagingService.getConnectionPool(message.from).getBackPressureInfo();
+        BackPressureState backPressureState = messagingService.getConnectionPool(InetAddress.getLoopbackAddress()).getBackPressureState();
         
         DatabaseDescriptor.setBackPressureEnabled(false);
-        messagingService.applyBackPressure(message.from);
+        messagingService.applyBackPressure(InetAddress.getLoopbackAddress());
         assertFalse(MockBackPressureStrategy.applied);
-        assertEquals(0.0, backPressureInfo.outgoingRate.get(TimeUnit.SECONDS), 0.0);
+        assertEquals(0.0, backPressureState.outgoingRate.get(TimeUnit.SECONDS), 0.0);
 
         DatabaseDescriptor.setBackPressureEnabled(true);
-        messagingService.applyBackPressure(message.from);
+        messagingService.applyBackPressure(InetAddress.getLoopbackAddress());
         assertTrue(MockBackPressureStrategy.applied);
-        assertEquals(1.0, backPressureInfo.outgoingRate.get(TimeUnit.SECONDS), 0.0);
+        assertEquals(1.0, backPressureState.outgoingRate.get(TimeUnit.SECONDS), 0.0);
     }
     
     @Test
-    public void testDoesntIncrementOutgoingRateWhenOverloaded() throws UnknownHostException
+    public void testDoesntIncrementOutgoingRateWhenOverloaded()
     {
-        MessageIn<String> message = MessageIn.create(InetAddress.getLocalHost(), "", Collections.emptyMap(), MessagingService.Verb.MUTATION, MessagingService.current_version);
-        BackPressureInfo backPressureInfo = messagingService.getConnectionPool(message.from).getBackPressureInfo();
+        BackPressureState backPressureState = messagingService.getConnectionPool(InetAddress.getLoopbackAddress()).getBackPressureState();
         
-        backPressureInfo.overload.set(true);
+        backPressureState.overload.set(true);
 
         DatabaseDescriptor.setBackPressureEnabled(true);
-        messagingService.applyBackPressure(message.from);
+        messagingService.applyBackPressure(InetAddress.getLoopbackAddress());
         assertTrue(MockBackPressureStrategy.applied);
-        assertEquals(0.0, backPressureInfo.outgoingRate.get(TimeUnit.SECONDS), 0.0);
+        assertEquals(0.0, backPressureState.outgoingRate.get(TimeUnit.SECONDS), 0.0);
     }
     
     public static class MockBackPressureStrategy implements BackPressureStrategy
@@ -118,7 +114,7 @@ public class MessagingServiceTest
         }
 
         @Override
-        public void apply(BackPressureInfo backPressureInfo)
+        public void apply(BackPressureState state)
         {
             applied = true;
         }

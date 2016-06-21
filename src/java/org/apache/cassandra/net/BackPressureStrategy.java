@@ -25,7 +25,7 @@ package org.apache.cassandra.net;
 public interface BackPressureStrategy
 {
     /**
-     * Applies the back-pressure algorithm, based and acting on the given {@link BackPressureInfo}.
+     * Applies the back-pressure algorithm, based and acting on the given {@link BackPressureState}.
      */
-    void apply(BackPressureInfo backPressureInfo);
+    void apply(BackPressureState state);
 }
