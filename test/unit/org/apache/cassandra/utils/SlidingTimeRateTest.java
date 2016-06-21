@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.utils;
 
-import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -130,7 +129,6 @@ public class SlidingTimeRateTest
         final ExecutorService executor = Executors.newFixedThreadPool(FBUtilities.getAvailableProcessors());
         final TestTimeSource time = new TestTimeSource();
         final SlidingTimeRate rate = new SlidingTimeRate(time, 5, 1, TimeUnit.SECONDS);
-        final Random r = new Random();
         int updates = 100000;
         for (int i = 0; i < updates; i++)
         {
@@ -142,7 +140,7 @@ public class SlidingTimeRateTest
                 {
                     try
                     {
-                        time.sleep(r.nextInt(100), TimeUnit.MILLISECONDS);
+                        time.sleep(1, TimeUnit.MILLISECONDS);
                         rate.update(1);
                     }
                     catch (Throwable ex)
@@ -155,6 +153,6 @@ public class SlidingTimeRateTest
         executor.shutdown();
 
         Assert.assertTrue(executor.awaitTermination(1, TimeUnit.MINUTES));
-        Assert.assertTrue(rate.get(TimeUnit.SECONDS) > 0);
+        Assert.assertEquals(1000, rate.get(TimeUnit.SECONDS), 100.0);
     }
 }
