@@ -1303,6 +1303,8 @@ public class StorageProxy implements StorageProxyMBean
 
         if (backPressureHosts != null)
             MessagingService.instance().applyBackPressure(backPressureHosts);
+        
+        responseHandler.start();
 
         if (endpointsToHint != null)
             submitHint(mutation, endpointsToHint, responseHandler);

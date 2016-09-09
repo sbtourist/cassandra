@@ -53,7 +53,7 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     private static final String BACK_PRESSURE_FLOW = "FAST";
 
     private static final Logger logger = LoggerFactory.getLogger(RateBasedBackPressure.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 30, TimeUnit.SECONDS);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
     
     protected final TimeSource timeSource;
     protected final double highRatio;

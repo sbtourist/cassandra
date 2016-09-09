@@ -51,6 +51,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final WriteType writeType;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
         = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
+    protected volatile long start;
     private volatile int failures = 0;
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
@@ -76,6 +77,11 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.writeType = writeType;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.queryStartNanoTime = queryStartNanoTime;
+    }
+    
+    public void start()
+    {
+        start = System.nanoTime();
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException
