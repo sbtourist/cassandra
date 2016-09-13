@@ -1176,7 +1176,7 @@ gc_warn_threshold_in_ms: 1000
 # Back-pressure settings #
 # If enabled, the coordinator will apply the back-pressure strategy specified below to each mutation
 # sent to replicas, with the aim of reducing pressure on overloaded replicas.
-back_pressure_enabled: false
+back_pressure_enabled: true
 # The back-pressure strategy applied. 
 # The default implementation, RateBasedBackPressure, takes three arguments:
 # high ratio, factor, and flow type, and uses the ratio between incoming mutation responses and outgoing mutation requests.
