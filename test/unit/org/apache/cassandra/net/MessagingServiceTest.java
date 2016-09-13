@@ -53,18 +53,13 @@ import static org.junit.Assert.*;
 
 public class MessagingServiceTest
 {
-    @BeforeClass
-    public static void initDD()
-    {
-        DatabaseDescriptor.daemonInitialization();
-    }
-
     private final MessagingService messagingService = MessagingService.test();
     private final static long[] bucketOffsets = new EstimatedHistogram(160).getBucketOffsets();
 
     @BeforeClass
     public static void beforeClass() throws UnknownHostException
     {
+        DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setBackPressureStrategy(new ParameterizedClass("org.apache.cassandra.net.MessagingServiceTest$MockBackPressureStrategy", Collections.emptyMap()));
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.0.0.1"));
     }
