@@ -47,7 +47,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.ParameterizedClass;
 
 import static org.junit.Assert.*;
 
@@ -60,7 +59,7 @@ public class MessagingServiceTest
     public static void beforeClass() throws UnknownHostException
     {
         DatabaseDescriptor.daemonInitialization();
-        DatabaseDescriptor.setBackPressureStrategy(new ParameterizedClass("org.apache.cassandra.net.MessagingServiceTest$MockBackPressureStrategy", Collections.emptyMap()));
+        DatabaseDescriptor.setBackPressureStrategy(new MockBackPressureStrategy(Collections.emptyMap()));
         DatabaseDescriptor.setBroadcastAddress(InetAddress.getByName("127.0.0.1"));
     }
 
