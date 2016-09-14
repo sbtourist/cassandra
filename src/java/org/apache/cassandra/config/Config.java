@@ -32,7 +32,6 @@ import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.net.RateBasedBackPressure;
 
 /**
  * A class that contains configuration properties for the cassandra node it runs within.
@@ -357,7 +356,7 @@ public class Config
     public UserFunctionTimeoutPolicy user_function_timeout_policy = UserFunctionTimeoutPolicy.die;
 
     public volatile boolean back_pressure_enabled = false;
-    public volatile ParameterizedClass back_pressure_strategy = RateBasedBackPressure.withDefaultParams();
+    public volatile ParameterizedClass back_pressure_strategy;
 
     public static boolean getOutboundBindAny()
     {

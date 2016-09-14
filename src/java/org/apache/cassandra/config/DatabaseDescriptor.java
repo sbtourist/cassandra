@@ -64,6 +64,8 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.cassandra.net.RateBasedBackPressure;
+
 public class DatabaseDescriptor
 {
     private static final Logger logger = LoggerFactory.getLogger(DatabaseDescriptor.class);
@@ -112,6 +114,7 @@ public class DatabaseDescriptor
     private static EncryptionContext encryptionContext;
     private static boolean hasLoggedConfig;
 
+    private static BackPressureStrategy backPressureStrategy;
     private static DiskOptimizationStrategy diskOptimizationStrategy;
 
     private static boolean clientInitialized;
@@ -707,6 +710,27 @@ public class DatabaseDescriptor
             case spinning:
                 diskOptimizationStrategy = new SpinningDiskOptimizationStrategy();
                 break;
+        }
+        
+        try
+        {
+            ParameterizedClass strategy = conf.back_pressure_strategy != null ? conf.back_pressure_strategy : RateBasedBackPressure.withDefaultParams();
+            Class<?> clazz = Class.forName(strategy.class_name);
+            if (!BackPressureStrategy.class.isAssignableFrom(clazz))
+                throw new ConfigurationException(strategy + " is not an instance of " + BackPressureStrategy.class.getCanonicalName(), false);
+
+            Constructor<?> ctor = clazz.getConstructor(Map.class);
+            BackPressureStrategy instance = (BackPressureStrategy) ctor.newInstance(strategy.parameters);
+            logger.info("Back-pressure is {} with strategy {}.", backPressureEnabled() ? "enabled" : "disabled", conf.back_pressure_strategy);
+            backPressureStrategy = instance;
+        }
+        catch (ConfigurationException ex)
+        {
+            throw ex;
+        }
+        catch (Exception ex)
+        {
+            throw new ConfigurationException("Error configuring back-pressure strategy: " + conf.back_pressure_strategy, ex);
         }
     }
 
@@ -2356,32 +2380,13 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    public static void setBackPressureStrategy(ParameterizedClass strategy)
+    public static void setBackPressureStrategy(BackPressureStrategy strategy)
     {
-        conf.back_pressure_strategy = strategy;
+        backPressureStrategy = strategy;
     }
 
     public static BackPressureStrategy getBackPressureStrategy()
     {
-        try
-        {
-            ParameterizedClass strategy = conf.back_pressure_strategy;
-            Class<?> clazz = Class.forName(strategy.class_name);
-            if (!BackPressureStrategy.class.isAssignableFrom(clazz))
-                throw new ConfigurationException(strategy + " is not an instance of " + BackPressureStrategy.class.getCanonicalName(), false);
-
-            Constructor<?> ctor = clazz.getConstructor(Map.class);
-            BackPressureStrategy instance = (BackPressureStrategy) ctor.newInstance(strategy.parameters);
-            logger.info("Back-pressure is {} with strategy {}.", backPressureEnabled() ? "enabled" : "disabled", conf.back_pressure_strategy);
-            return instance;
-        }
-        catch (ConfigurationException ex)
-        {
-            throw ex;
-        }
-        catch (Exception ex)
-        {
-            throw new ConfigurationException("Error configuring back-pressure strategy: " + conf.back_pressure_strategy, ex);
-        }
+        return backPressureStrategy;
     }
 }

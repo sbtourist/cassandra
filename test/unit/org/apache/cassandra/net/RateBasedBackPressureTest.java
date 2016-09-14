@@ -44,25 +44,25 @@ public class RateBasedBackPressureTest
     @Test(expected = IllegalArgumentException.class)
     public void testAcceptsNoLessThanThreeArguments() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "1"));
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "1"), new TestTimeSource(), 10);
     }
     
     @Test(expected = IllegalArgumentException.class)
     public void testHighRatioMustBeBiggerThanZero() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0", FACTOR, "2", FLOW, "FAST"));
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0", FACTOR, "2", FLOW, "FAST"), new TestTimeSource(), 10);
     }
     
     @Test(expected = IllegalArgumentException.class)
     public void testHighRatioMustBeSmallerEqualThanOne() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "2", FACTOR, "2", FLOW, "FAST"));
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "2", FACTOR, "2", FLOW, "FAST"), new TestTimeSource(), 10);
     }
     
     @Test(expected = IllegalArgumentException.class)
     public void testFactorMustBeBiggerEqualThanOne() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "0", FLOW, "FAST"));
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "0", FLOW, "FAST"), new TestTimeSource(), 10);
     }
     
     @Test(expected = IllegalArgumentException.class)
@@ -74,11 +74,11 @@ public class RateBasedBackPressureTest
     @Test
     public void testFlowMustBeEitherFASTorSLOW() throws Exception
     {
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "FAST"));
-        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "SLOW"));
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "FAST"), new TestTimeSource(), 10);
+        new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "SLOW"), new TestTimeSource(), 10);
         try
         {
-            new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "WRONG"));
+            new RateBasedBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "1", FLOW, "WRONG"), new TestTimeSource(), 10);
             fail("Expected to fail with wrong flow type.");
         }
         catch (Exception ex)
