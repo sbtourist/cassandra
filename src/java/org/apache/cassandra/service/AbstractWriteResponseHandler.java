@@ -51,7 +51,6 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final WriteType writeType;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
         = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
-    protected volatile long start;
     private volatile int failures = 0;
     private final Map<InetAddress, RequestFailureReason> failureReasonByEndpoint;
     private final long queryStartNanoTime;
@@ -78,19 +77,10 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         this.queryStartNanoTime = queryStartNanoTime;
     }
-    
-    public void start()
-    {
-        start = System.nanoTime();
-    }
 
     public void get() throws WriteTimeoutException, WriteFailureException
     {
-        long requestTimeout = writeType == WriteType.COUNTER
-                            ? DatabaseDescriptor.getCounterWriteRpcTimeout()
-                            : DatabaseDescriptor.getWriteRpcTimeout();
-
-        long timeout = TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
+        long timeout = currentTimeout();
 
         boolean success;
         try
@@ -118,6 +108,14 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         {
             throw new WriteFailureException(consistencyLevel, ackCount(), totalBlockFor(), writeType, failureReasonByEndpoint);
         }
+    }
+
+    public final long currentTimeout()
+    {
+        long requestTimeout = writeType == WriteType.COUNTER
+                              ? DatabaseDescriptor.getCounterWriteRpcTimeout()
+                              : DatabaseDescriptor.getWriteRpcTimeout();
+        return TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
     }
 
     /**

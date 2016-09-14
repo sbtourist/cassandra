@@ -27,6 +27,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.RateLimiter;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.cassandra.utils.TestTimeSource;
@@ -36,11 +37,12 @@ import static org.apache.cassandra.net.RateBasedBackPressure.FACTOR;
 import static org.apache.cassandra.net.RateBasedBackPressure.FLOW;
 import static org.apache.cassandra.net.RateBasedBackPressure.HIGH_RATIO;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class RateBasedBackPressureTest
-{
+{    
     @Test(expected = IllegalArgumentException.class)
     public void testAcceptsNoLessThanThreeArguments() throws Exception
     {
@@ -129,7 +131,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
         
         // Verify the rate doesn't change because already at infinity:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         assertEquals(initialRate, state.rateLimiter.getRate(), 0.0);
     }
     
@@ -153,7 +155,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
         
         // Verify the timestamp changed:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         current = state.getLastIntervalAcquire();
         assertEquals(timeSource.currentTimeMillis(), current);
         
@@ -162,7 +164,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize / 2, TimeUnit.MILLISECONDS);
         
         // Verify the last timestamp didn't change because below the window size:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         current = state.getLastIntervalAcquire();
         assertEquals(previous, current);
     }
@@ -183,7 +185,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
         
         // Verify the rate is decreased by factor:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         assertEquals(7.4, state.rateLimiter.getRate(), 0.1);
     }
     
@@ -203,7 +205,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
         
         // Verify the rate decreased:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         assertEquals(7.4, state.rateLimiter.getRate(), 0.1);
         
         // Update incoming and outgoing rate back above high rate:
@@ -214,7 +216,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
         
         // Verify rate limiter is increased by factor:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         assertEquals(8.25, state.rateLimiter.getRate(), 0.1);
         
         // Update incoming and outgoing rate to keep it below the limiter rate:
@@ -225,7 +227,7 @@ public class RateBasedBackPressureTest
         timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
         
         // Verify rate limiter is not increased as already higher than the actual rate:
-        strategy.apply(Sets.newHashSet(state));
+        strategy.apply(Sets.newHashSet(state), 1, TimeUnit.SECONDS);
         assertEquals(8.25, state.rateLimiter.getRate(), 0.1);
     }
 
@@ -252,7 +254,8 @@ public class RateBasedBackPressureTest
 
         // Verify the fast replica rate limiting has been applied:
         Set<RateBasedBackPressureState> replicaGroup = Sets.newHashSet(state1, state2, state3);
-        strategy.apply(replicaGroup);
+        strategy.apply(replicaGroup, 1, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
         assertTrue(strategy.checkApplied());
         assertEquals(12.0, strategy.getRateLimiterForReplicaGroup(replicaGroup).getRate(), 0.1);
     }
@@ -280,7 +283,8 @@ public class RateBasedBackPressureTest
 
         // Verify the slow replica rate limiting has been applied:
         Set<RateBasedBackPressureState> replicaGroup = Sets.newHashSet(state1, state2, state3);
-        strategy.apply(replicaGroup);
+        strategy.apply(replicaGroup, 1, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
         assertTrue(strategy.checkApplied());
         assertEquals(3.0, strategy.getRateLimiterForReplicaGroup(replicaGroup).getRate(), 0.1);
     }
@@ -311,20 +315,68 @@ public class RateBasedBackPressureTest
 
         // Verify the first group:
         Set<RateBasedBackPressureState> replicaGroup = Sets.newHashSet(state1, state2);
-        strategy.apply(replicaGroup);
+        strategy.apply(replicaGroup, 1, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
         assertTrue(strategy.checkApplied());
         assertEquals(7.4, strategy.getRateLimiterForReplicaGroup(replicaGroup).getRate(), 0.1);
 
         // Verify the second group:
         replicaGroup = Sets.newHashSet(state3, state4);
-        strategy.apply(replicaGroup);
+        strategy.apply(replicaGroup, 1, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
         assertTrue(strategy.checkApplied());
         assertEquals(3.0, strategy.getRateLimiterForReplicaGroup(replicaGroup).getRate(), 0.1);
     }
 
+    @Test
+    public void testBackPressurePastTimeout() throws Exception
+    {
+        long windowSize = 10000;
+        TestTimeSource timeSource = new TestTimeSource();
+        TestableBackPressure strategy = new TestableBackPressure(ImmutableMap.of(HIGH_RATIO, "0.9", FACTOR, "10", FLOW, "SLOW"), timeSource, windowSize);
+        RateBasedBackPressureState state1 = strategy.newState(InetAddress.getByName("127.0.0.1"));
+        RateBasedBackPressureState state2 = strategy.newState(InetAddress.getByName("127.0.0.2"));
+        RateBasedBackPressureState state3 = strategy.newState(InetAddress.getByName("127.0.0.3"));
+
+        // Update incoming and outgoing rates:
+        state1.incomingRate.update(5); // slow
+        state1.outgoingRate.update(100);
+        state2.incomingRate.update(100);
+        state2.outgoingRate.update(100);
+        state3.incomingRate.update(100); 
+        state3.outgoingRate.update(100);
+
+        // Move time ahead:
+        timeSource.sleep(windowSize, TimeUnit.MILLISECONDS);
+
+        // Verify the slow replica rate limiting has been applied:
+        Set<RateBasedBackPressureState> replicaGroup = Sets.newHashSet(state1, state2, state3);
+        strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        assertTrue(strategy.checkAcquired());
+        assertTrue(strategy.checkApplied());
+        assertEquals(0.5, strategy.getRateLimiterForReplicaGroup(replicaGroup).getRate(), 0.1);
+        
+        // Make one more apply call to saturate the rate limit timeout (0.5 requests per second means 2 requests span
+        // 4 seconds, but we can only make one as we have to subtract the incoming response time):
+        strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        
+        // Now verify another call to apply doesn't acquire the rate limit because of the max timeout of 4 seconds minus
+        // 2 seconds of response time, so the time source itself sleeps two second:
+        long start = timeSource.currentTimeMillis();
+        strategy.apply(replicaGroup, 4, TimeUnit.SECONDS);
+        assertFalse(strategy.checkAcquired());
+        assertTrue(strategy.checkApplied());
+        assertEquals(TimeUnit.NANOSECONDS.convert(2, TimeUnit.SECONDS), 
+                     strategy.timeout);
+        assertEquals(strategy.timeout, 
+                     TimeUnit.NANOSECONDS.convert(timeSource.currentTimeMillis() - start, TimeUnit.MILLISECONDS));
+    }
+    
     public static class TestableBackPressure extends RateBasedBackPressure
     {
+        public volatile boolean acquired = false;
         public volatile boolean applied = false;
+        public volatile long timeout;
         
         public TestableBackPressure(Map<String, Object> args, TimeSource timeSource, long windowSize)
         {
@@ -332,10 +384,19 @@ public class RateBasedBackPressureTest
         }
 
         @Override
-        public void doRateLimit(RateLimiter rateLimiter)
+        public boolean doRateLimit(RateLimiter rateLimiter, long timeoutInNanos)
         {
-            super.doRateLimit(rateLimiter);
+            acquired = super.doRateLimit(rateLimiter, timeoutInNanos);
             applied = true;
+            timeout = timeoutInNanos;
+            return acquired;
+        }
+        
+        public boolean checkAcquired()
+        {
+            boolean checked = acquired;
+            acquired = false;
+            return checked;
         }
 
         public boolean checkApplied()

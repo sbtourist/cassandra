@@ -601,15 +601,16 @@ public final class MessagingService implements MessagingServiceMBean
      * to remote hosts.
      *
      * @param hosts The hosts to apply back-pressure to.
+     * @param timeoutInNanos The max back-pressure timeout.
      */
-    public void applyBackPressure(Iterable<InetAddress> hosts)
+    public void applyBackPressure(Iterable<InetAddress> hosts, long timeoutInNanos)
     {
         if (DatabaseDescriptor.backPressureEnabled())
         {
             backPressure.apply(StreamSupport.stream(hosts.spliterator(), false)
                     .filter(h -> !h.equals(FBUtilities.getBroadcastAddress()))
                     .map(h -> getConnectionPool(h).getBackPressureState())
-                    .collect(Collectors.toSet()));
+                    .collect(Collectors.toSet()), timeoutInNanos, TimeUnit.NANOSECONDS);
         }
     }
 

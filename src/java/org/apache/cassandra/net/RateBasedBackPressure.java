@@ -124,29 +124,33 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     }
 
     @Override
-    public void apply(Set<RateBasedBackPressureState> states)
+    public void apply(Set<RateBasedBackPressureState> states, long timeout, TimeUnit unit)
     {        
         // Go through the back-pressure states, try updating each of them and collect min/max rates:
         boolean isUpdated = false;
-        double minRate = Double.POSITIVE_INFINITY;
-        double maxRate = Double.NEGATIVE_INFINITY;
+        double minRateLimit = Double.POSITIVE_INFINITY;
+        double maxRateLimit = Double.NEGATIVE_INFINITY;
+        double minIncomingRate = Double.POSITIVE_INFINITY;
         RateLimiter currentMin = null;
         RateLimiter currentMax = null;
         for (RateBasedBackPressureState backPressure : states) 
         {
+            // Get the incoming/outgoing rates:
+            double incomingRate = backPressure.incomingRate.get(TimeUnit.SECONDS);
+            double outgoingRate = backPressure.outgoingRate.get(TimeUnit.SECONDS);
+            // Compute the min incoming rate:
+            if (incomingRate < minIncomingRate)
+                minIncomingRate = incomingRate;
+            
             // Try acquiring the interval lock:
             if (backPressure.tryIntervalLock(windowSize))
-            {
+            {   
                 // If acquired, proceed updating thi back-pressure state rate limit:
                 isUpdated = true;
                 try
                 {
                     RateLimiter limiter = backPressure.rateLimiter;
 
-                    // Get the incoming/outgoing rates:
-                    double incomingRate = backPressure.incomingRate.get(TimeUnit.SECONDS);
-                    double outgoingRate = backPressure.outgoingRate.get(TimeUnit.SECONDS);
-                    
                     // If we have sent any outgoing requests during this time window, go ahead with rate limiting
                     // (this is safe against concurrent back-pressure state updates thanks to the rw-locking in
                     // RateBasedBackPressureState):
@@ -197,14 +201,14 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
                     backPressure.releaseIntervalLock();
                 }
             }
-            if (backPressure.rateLimiter.getRate() <= minRate)
+            if (backPressure.rateLimiter.getRate() <= minRateLimit)
             {
-                minRate = backPressure.rateLimiter.getRate();
+                minRateLimit = backPressure.rateLimiter.getRate();
                 currentMin = backPressure.rateLimiter;
             }
-            if (backPressure.rateLimiter.getRate() >= maxRate)
+            if (backPressure.rateLimiter.getRate() >= maxRateLimit)
             {
-                maxRate = backPressure.rateLimiter.getRate();
+                maxRateLimit = backPressure.rateLimiter.getRate();
                 currentMax = backPressure.rateLimiter;
             }
         }
@@ -239,9 +243,12 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
                 }
                 // Assigning a single rate limiter per replica group once per window size allows the back-pressure rate 
                 // limiting to be stable within the group itself.
-
-                // Finally apply the rate limit:
-                doRateLimit(rateLimiter.limiter);
+                
+                // Finally apply the rate limit with a max pause time equal to the provided timeout minus the
+                // response time computed from the incoming rate, to reduce the number of client timeouts by taking into
+                // account how long it could take to process responses after back-pressure:
+                long responseTimeInNanos = (long) (TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS) / minIncomingRate);
+                doRateLimit(rateLimiter.limiter, Math.max(0, TimeUnit.NANOSECONDS.convert(timeout, unit) - responseTimeInNanos));
             }
             catch (ExecutionException ex)
             {
@@ -264,9 +271,14 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     }
 
     @VisibleForTesting
-    void doRateLimit(RateLimiter rateLimiter)
+    boolean doRateLimit(RateLimiter rateLimiter, long timeoutInNanos)
     {
-        rateLimiter.acquire(1);
+        if (!rateLimiter.tryAcquire(1, timeoutInNanos, TimeUnit.NANOSECONDS))
+        {
+            timeSource.sleepUninterruptibly(timeoutInNanos, TimeUnit.NANOSECONDS);
+            return false;
+        }
+        return true;
     }
 
     private static class IntervalRateLimiter extends IntervalLock

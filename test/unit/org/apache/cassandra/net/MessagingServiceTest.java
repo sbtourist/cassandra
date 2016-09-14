@@ -52,8 +52,9 @@ import static org.junit.Assert.*;
 
 public class MessagingServiceTest
 {
-    private final MessagingService messagingService = MessagingService.test();
+    private final static long ONE_SECOND = TimeUnit.NANOSECONDS.convert(1, TimeUnit.SECONDS);
     private final static long[] bucketOffsets = new EstimatedHistogram(160).getBucketOffsets();
+    private final MessagingService messagingService = MessagingService.test();
 
     @BeforeClass
     public static void beforeClass() throws UnknownHostException
@@ -204,11 +205,11 @@ public class MessagingServiceTest
     public void testAppliesBackPressureWhenEnabled() throws UnknownHostException
     {
         DatabaseDescriptor.setBackPressureEnabled(false);
-        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.2")));
+        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.2")), ONE_SECOND);
         assertFalse(MockBackPressureStrategy.applied);
 
         DatabaseDescriptor.setBackPressureEnabled(true);
-        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.2")));
+        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.2")), ONE_SECOND);
         assertTrue(MockBackPressureStrategy.applied);
     }
     
@@ -216,7 +217,7 @@ public class MessagingServiceTest
     public void testDoesntApplyBackPressureToBroadcastAddress() throws UnknownHostException
     {
         DatabaseDescriptor.setBackPressureEnabled(true);
-        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.1")));
+        messagingService.applyBackPressure(Arrays.asList(InetAddress.getByName("127.0.0.1")), ONE_SECOND);
         assertFalse(MockBackPressureStrategy.applied);
     }
     
@@ -240,7 +241,7 @@ public class MessagingServiceTest
         }
 
         @Override
-        public void apply(Set<MockBackPressureState> states)
+        public void apply(Set<MockBackPressureState> states, long timeout, TimeUnit unit)
         {
             if (!Iterables.isEmpty(states))
                 applied = true;
