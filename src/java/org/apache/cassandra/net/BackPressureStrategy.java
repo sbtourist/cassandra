@@ -19,6 +19,7 @@ package org.apache.cassandra.net;
 
 import java.net.InetAddress;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Back-pressure algorithm interface.
@@ -29,9 +30,10 @@ import java.util.Set;
 public interface BackPressureStrategy<S extends BackPressureState>
 {
     /**
-     * Applies the back-pressure algorithm, based and acting on the given {@link BackPressureState}s.
+     * Applies the back-pressure algorithm, based and acting on the given {@link BackPressureState}s, and up to the given
+     * timeout.
      */
-    void apply(Set<S> states);
+    void apply(Set<S> states, long timeout, TimeUnit unit);
     
     /** 
      * Creates a new {@link BackPressureState} initialized as needed by the specific implementation.
