@@ -53,7 +53,8 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
     private static final String BACK_PRESSURE_FLOW = "FAST";
 
     private static final Logger logger = LoggerFactory.getLogger(RateBasedBackPressure.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
+    private static final NoSpamLogger tenSecsNoSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
+    private static final NoSpamLogger oneMinNoSpamLogger = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
     
     protected final TimeSource timeSource;
     protected final double highRatio;
@@ -234,7 +235,7 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
                         else
                             rateLimiter.limiter = currentMin;
                         
-                        noSpamLogger.info("{} currently applied for remote replicas: {}", rateLimiter.limiter, states);
+                        tenSecsNoSpamLogger.info("{} currently applied for remote replicas: {}", rateLimiter.limiter, states);
                     }
                     finally
                     {
@@ -276,8 +277,12 @@ public class RateBasedBackPressure implements BackPressureStrategy<RateBasedBack
         if (!rateLimiter.tryAcquire(1, timeoutInNanos, TimeUnit.NANOSECONDS))
         {
             timeSource.sleepUninterruptibly(timeoutInNanos, TimeUnit.NANOSECONDS);
+            oneMinNoSpamLogger.info("Cannot apply {} due to exceeding write timeout, pausing {} nanoseconds instead.", 
+                                    rateLimiter, timeoutInNanos);
+
             return false;
         }
+
         return true;
     }
 
