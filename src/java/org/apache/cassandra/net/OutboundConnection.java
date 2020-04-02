@@ -95,7 +95,7 @@ import static org.apache.cassandra.utils.Throwables.isCausedBy;
 public class OutboundConnection
 {
     static final Logger logger = LoggerFactory.getLogger(OutboundConnection.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 30L, TimeUnit.SECONDS);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
 
     private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submittedCount");
     private static final AtomicLongFieldUpdater<OutboundConnection> pendingCountAndBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "pendingCountAndBytes");
@@ -837,6 +837,9 @@ public class OutboundConnection
                     boolean hasOverflowed = flushingBytes >= settings.flushHighWaterMark;
                     if (hasOverflowed)
                     {
+                        if (type == ConnectionType.SMALL_MESSAGES)
+                            noSpamLogger.info("Setting as unwritable because {} >= {}", flushingBytes, settings.flushHighWaterMark);
+
                         isWritable = false;
                         promiseToExecuteLater();
                     }
@@ -853,6 +856,9 @@ public class OutboundConnection
 
                         if (!isWritable && flushingBytes <= settings.flushLowWaterMark)
                         {
+                            if (type == ConnectionType.SMALL_MESSAGES)
+                                noSpamLogger.info("Setting as writable because {} <= {}", flushingBytes, settings.flushLowWaterMark);
+
                             isWritable = true;
                             executeAgain();
                         }
@@ -882,6 +888,9 @@ public class OutboundConnection
             }
             finally
             {
+                if (type == ConnectionType.SMALL_MESSAGES)
+                    noSpamLogger.info("Wrote {} messages and {} bytes", sendingCount, sendingBytes);
+
                 if (canonicalSize > 0)
                     releaseCapacity(sendingCount, canonicalSize);
 
