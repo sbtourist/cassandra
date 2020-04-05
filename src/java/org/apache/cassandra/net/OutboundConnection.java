@@ -722,6 +722,7 @@ public class OutboundConnection
     {
         private int flushingBytes;
         private boolean isWritable = true;
+        private long unwritableTimeInMillis;
 
         EventLoopDelivery()
         {
@@ -837,8 +838,11 @@ public class OutboundConnection
                     boolean hasOverflowed = flushingBytes >= settings.flushHighWaterMark;
                     if (hasOverflowed)
                     {
-                        if (type == ConnectionType.SMALL_MESSAGES)
-                            noSpamLogger.info("Setting as unwritable because {} >= {}", flushingBytes, settings.flushHighWaterMark);
+                        if (type != ConnectionType.URGENT_MESSAGES)
+                        {
+                            logger.info("Setting {} connection as unwritable because {}B >= {}B", type, flushingBytes, settings.flushHighWaterMark);
+                            unwritableTimeInMillis = System.currentTimeMillis();
+                        }
 
                         isWritable = false;
                         promiseToExecuteLater();
@@ -856,8 +860,8 @@ public class OutboundConnection
 
                         if (!isWritable && flushingBytes <= settings.flushLowWaterMark)
                         {
-                            if (type == ConnectionType.SMALL_MESSAGES)
-                                noSpamLogger.info("Setting as writable because {} <= {}", flushingBytes, settings.flushLowWaterMark);
+                            if (type != ConnectionType.URGENT_MESSAGES)
+                                logger.info("Setting {} connection as writable after {}ms because {}B <= {}B", type, System.currentTimeMillis() - unwritableTimeInMillis, flushingBytes, settings.flushLowWaterMark);
 
                             isWritable = true;
                             executeAgain();
