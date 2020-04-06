@@ -78,7 +78,7 @@ class OutboundMessageQueue
      */
     void add(Message<?> m)
     {
-        maybePruneExpired();
+        //maybePruneExpired();
         externalQueue.offer(m);
         maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
     }
