@@ -459,7 +459,8 @@ public class OutboundConnection
         releaseCapacity(1, canonicalSize(message));
         expiredCount += 1;
         expiredBytes += canonicalSize(message);
-        noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), message.verb());
+        noSpamLogger.warn("{} dropping message of type {} whose timeout of {}ns expired before reaching the network",
+                          id(), message.verb(), message.verb().expiresAfterNanos());
         callbacks.onExpired(message, template.to);
         return true;
     }
