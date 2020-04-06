@@ -185,7 +185,7 @@ class OutboundMessageQueue
         @Override
         public void close()
         {
-            pruneInternalQueueWithLock(nowNanos);
+            //pruneInternalQueueWithLock(nowNanos);
             unlock();
         }
     }
