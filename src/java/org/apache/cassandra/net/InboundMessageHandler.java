@@ -541,17 +541,17 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private boolean acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes, long currentTimeNanos, long expiresAtNanos)
     {
-//        ResourceLimits.Outcome outcome = acquireCapacity(endpointReserve, globalReserve, bytes);
-//
-//        if (outcome == ResourceLimits.Outcome.INSUFFICIENT_ENDPOINT)
-//            ticket = endpointWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
-//        else if (outcome == ResourceLimits.Outcome.INSUFFICIENT_GLOBAL)
-//            ticket = globalWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
-//
-//        if (outcome != ResourceLimits.Outcome.SUCCESS)
-//            throttledCount++;
+        ResourceLimits.Outcome outcome = acquireCapacity(endpointReserve, globalReserve, bytes);
 
-        return true;
+        if (outcome == ResourceLimits.Outcome.INSUFFICIENT_ENDPOINT)
+            ticket = endpointWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
+        else if (outcome == ResourceLimits.Outcome.INSUFFICIENT_GLOBAL)
+            ticket = globalWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
+
+        if (outcome != ResourceLimits.Outcome.SUCCESS)
+            throttledCount++;
+
+        return outcome == ResourceLimits.Outcome.SUCCESS;
     }
 
     private ResourceLimits.Outcome acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes)
@@ -606,17 +606,17 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
 
     private void releaseCapacity(int bytes)
     {
-//        long oldQueueSize = queueSizeUpdater.getAndAdd(this, -bytes);
-//        if (oldQueueSize > queueCapacity)
-//        {
-//            long excess = min(oldQueueSize - queueCapacity, bytes);
-//
-//            endpointReserveCapacity.release(excess);
-//            globalReserveCapacity.release(excess);
-//
-//            endpointWaitQueue.signal();
-//            globalWaitQueue.signal();
-//        }
+        long oldQueueSize = queueSizeUpdater.getAndAdd(this, -bytes);
+        if (oldQueueSize > queueCapacity)
+        {
+            long excess = min(oldQueueSize - queueCapacity, bytes);
+
+            endpointReserveCapacity.release(excess);
+            globalReserveCapacity.release(excess);
+
+            endpointWaitQueue.signal();
+            globalWaitQueue.signal();
+        }
     }
 
     /**
