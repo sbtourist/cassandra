@@ -38,8 +38,7 @@ class FrameEncoderCrc extends FrameEncoder
     static final int HEADER_AND_TRAILER_LENGTH = 10;
 
     static final FrameEncoderCrc instance = new FrameEncoderCrc();
-    static final PayloadAllocator allocator = (isSelfContained, capacity) ->
-        new Payload(isSelfContained, capacity, HEADER_LENGTH, TRAILER_LENGTH);
+    static final PayloadAllocator allocator = new PayloadAllocator(HEADER_LENGTH, TRAILER_LENGTH);
 
     PayloadAllocator allocator()
     {

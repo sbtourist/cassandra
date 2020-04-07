@@ -37,8 +37,7 @@ import static org.apache.cassandra.net.FrameEncoderCrc.writeHeader;
 class FrameEncoderUnprotected extends FrameEncoder
 {
     static final FrameEncoderUnprotected instance = new FrameEncoderUnprotected();
-    static final PayloadAllocator allocator = (isSelfContained, capacity) ->
-        new Payload(isSelfContained, capacity, HEADER_LENGTH, 0);
+    static final PayloadAllocator allocator = new PayloadAllocator(HEADER_LENGTH, 0);
 
     PayloadAllocator allocator()
     {
