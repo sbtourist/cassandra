@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
@@ -49,6 +50,7 @@ import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
+import jnr.x86asm.Asm;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
@@ -163,15 +165,17 @@ public class OutboundConnection
 
     private static class State
     {
-        static final State CLOSED  = new State(Kind.CLOSED);
-
         enum Kind { ESTABLISHED, CONNECTING, DORMANT, CLOSED }
 
         final Kind kind;
+        final String id;
 
-        State(Kind kind)
+        State(OutboundConnectionSettings connectionSettings, ConnectionType connectionType, String connectionId, Kind kind)
         {
             this.kind = kind;
+            this.id = connectionId == null
+                      ? SocketFactory.channelId(connectionSettings.from(), connectionSettings.to, connectionType, "[no-channel]")
+                      : connectionId;
         }
 
         boolean isEstablished()  { return kind == Kind.ESTABLISHED; }
@@ -182,6 +186,11 @@ public class OutboundConnection
         Established  established()  { return (Established)  this; }
         Connecting   connecting()   { return (Connecting)   this; }
         Disconnected disconnected() { return (Disconnected) this; }
+
+        static State closed(OutboundConnectionSettings connectionSettings, ConnectionType connectionType)
+        {
+            return new State(connectionSettings, connectionType, null, Kind.CLOSED);
+        }
     }
 
     /**
@@ -197,13 +206,17 @@ public class OutboundConnection
         final FrameEncoder.PayloadAllocator payloadAllocator;
         final OutboundConnectionSettings settings;
 
-        Established(int messagingVersion, Channel channel, FrameEncoder.PayloadAllocator payloadAllocator, OutboundConnectionSettings settings)
+        Established(OutboundConnectionSettings connectionSettings, ConnectionType connectionType,
+                    int messagingVersion, Channel channel, FrameEncoder.PayloadAllocator payloadAllocator)
         {
-            super(Kind.ESTABLISHED);
+            super(connectionSettings, connectionType,
+                  SocketFactory.channelId(connectionSettings.from(), connectionSettings.to, connectionType, channel.id().asShortText()),
+                  Kind.ESTABLISHED);
+
             this.messagingVersion = messagingVersion;
             this.channel = channel;
             this.payloadAllocator = payloadAllocator;
-            this.settings = settings;
+            this.settings = connectionSettings;
         }
 
         boolean isConnected() { return channel.isOpen(); }
@@ -213,15 +226,17 @@ public class OutboundConnection
     {
         /** Periodic message expiry scheduled while we are disconnected; this will be cancelled and cleared each time we connect */
         final Future<?> maintenance;
-        Disconnected(Kind kind, Future<?> maintenance)
+
+        Disconnected(OutboundConnectionSettings connectionSettings, ConnectionType connectionType,
+                     Kind kind, Future<?> maintenance)
         {
-            super(kind);
+            super(connectionSettings, connectionType, null, kind);
             this.maintenance = maintenance;
         }
 
-        public static Disconnected dormant(Future<?> maintenance)
+        public static Disconnected dormant(OutboundConnectionSettings connectionSettings, ConnectionType connectionType, Future<?> maintenance)
         {
-            return new Disconnected(Kind.DORMANT, maintenance);
+            return new Disconnected(connectionSettings, connectionType, Kind.DORMANT, maintenance);
         }
     }
 
@@ -247,14 +262,16 @@ public class OutboundConnection
          */
         final boolean isFailingToConnect;
 
-        Connecting(Disconnected previous, Future<Result<MessagingSuccess>> attempt)
+        Connecting(OutboundConnectionSettings connectionSettings, ConnectionType connectionType,
+                   Disconnected previous, Future<Result<MessagingSuccess>> attempt)
         {
-            this(previous, attempt, null);
+            this(connectionSettings, connectionType, previous, attempt, null);
         }
 
-        Connecting(Disconnected previous, Future<Result<MessagingSuccess>> attempt, Future<?> scheduled)
+        Connecting(OutboundConnectionSettings connectionSettings, ConnectionType connectionType,
+                   Disconnected previous, Future<Result<MessagingSuccess>> attempt, Future<?> scheduled)
         {
-            super(Kind.CONNECTING, previous.maintenance);
+            super(connectionSettings, connectionType, Kind.CONNECTING, previous.maintenance);
             this.attempt = attempt;
             this.scheduled = scheduled;
             this.isFailingToConnect = scheduled != null || (previous.isConnecting() && previous.connecting().isFailingToConnect);
@@ -1098,13 +1115,13 @@ public class OutboundConnection
                 if (hasPending())
                 {
                     Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
-                    state = new Connecting(state.disconnected(), result, eventLoop.schedule(() -> attempt(result), max(100, retryRateMillis), MILLISECONDS));
+                    state = new Connecting(template, type, state.disconnected(), result, eventLoop.schedule(() -> attempt(result), max(100, retryRateMillis), MILLISECONDS));
                     retryRateMillis = min(1000, retryRateMillis * 2);
                 }
                 else
                 {
                     // this Initiate will be discarded
-                    state = Disconnected.dormant(state.disconnected().maintenance);
+                    state = Disconnected.dormant(template, type, state.disconnected().maintenance);
                 }
             }
 
@@ -1122,7 +1139,7 @@ public class OutboundConnection
 
                         FrameEncoder.PayloadAllocator payloadAllocator = success.allocator;
                         Channel channel = success.channel;
-                        Established established = new Established(messagingVersion, channel, payloadAllocator, settings);
+                        Established established = new Established(settings, type, messagingVersion, channel, payloadAllocator);
                         state = established;
                         channel.pipeline().addLast("handleExceptionalStates", new ChannelInboundHandlerAdapter() {
                             @Override
@@ -1211,7 +1228,7 @@ public class OutboundConnection
             Future<Result<MessagingSuccess>> initiate()
             {
                 Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
-                state = new Connecting(state.disconnected(), result);
+                state = new Connecting(template, type, state.disconnected(), result);
                 attempt(result);
                 return result;
             }
@@ -1374,7 +1391,7 @@ public class OutboundConnection
     private void setDisconnected()
     {
         assert state == null || state.isEstablished();
-        state = Disconnected.dormant(eventLoop.scheduleAtFixedRate(queue::maybePruneExpired, 100L, 100L, TimeUnit.MILLISECONDS));
+        state = Disconnected.dormant(template, type, eventLoop.scheduleAtFixedRate(queue::maybePruneExpired, 100L, 100L, TimeUnit.MILLISECONDS));
     }
 
     /**
@@ -1428,7 +1445,7 @@ public class OutboundConnection
             Runnable onceNotConnecting = () -> {
                 // start by setting ourselves to definitionally closed
                 State state = this.state;
-                this.state = State.CLOSED;
+                this.state = State.closed(template, type);
 
                 try
                 {
@@ -1582,16 +1599,7 @@ public class OutboundConnection
 
     private String id()
     {
-        State state = this.state;
-        Channel channel = null;
-        OutboundConnectionSettings settings = template;
-        if (state.isEstablished())
-        {
-            channel = state.established().channel;
-            settings = state.established().settings;
-        }
-        String channelId = channel != null ? channel.id().asShortText() : "[no-channel]";
-        return SocketFactory.channelId(settings.from(), settings.to, type, channelId);
+        return state != null ? state.id : "[non-initialized]";
     }
 
     @Override
