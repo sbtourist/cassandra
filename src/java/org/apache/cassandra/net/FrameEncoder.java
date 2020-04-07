@@ -46,6 +46,11 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
         // an API-misuse detector
         private boolean isFinished = false;
 
+        Payload(boolean isSelfContained, int payloadCapacity)
+        {
+            this(isSelfContained, payloadCapacity, 0, 0);
+        }
+
         Payload(boolean isSelfContained, int payloadCapacity, int headerLength, int trailerLength)
         {
             this.isSelfContained = isSelfContained;
@@ -107,23 +112,10 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
         }
     }
 
-    static class PayloadAllocator
+    interface PayloadAllocator
     {
-        public static final PayloadAllocator simple = new PayloadAllocator(0, 0);
-
-        final int headerLength;
-        final int trailerLength;
-
-        public PayloadAllocator(int headerLength, int trailerLength)
-        {
-            this.headerLength = headerLength;
-            this.trailerLength = trailerLength;
-        }
-
-        Payload allocate(boolean isSelfContained, int capacity)
-        {
-            return new Payload(isSelfContained, capacity, headerLength, trailerLength);
-        }
+        public static final PayloadAllocator simple = Payload::new;
+        Payload allocate(boolean isSelfContained, int capacity);
     }
 
     PayloadAllocator allocator()
