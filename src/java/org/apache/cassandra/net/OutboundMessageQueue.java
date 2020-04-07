@@ -78,7 +78,7 @@ class OutboundMessageQueue
      */
     void add(Message<?> m)
     {
-        maybePruneExpired();
+        //maybePruneExpired();
         externalQueue.offer(m);
         maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
     }
@@ -185,7 +185,7 @@ class OutboundMessageQueue
         @Override
         public void close()
         {
-            pruneInternalQueueWithLock(nowNanos);
+            //pruneInternalQueueWithLock(nowNanos);
             unlock();
         }
     }
