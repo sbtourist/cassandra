@@ -21,11 +21,13 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
@@ -207,10 +209,16 @@ class OutboundMessageQueue
     {
         if (approxTime.isAfter(nowNanos, nextExpirationDeadline))
             return tryRun(() -> pruneWithLock(nowNanos));
-        
+
         return false;
     }
 
+    /**
+     * Update {@code earliestExpiresAt} with the given {@code candidateTime} if less than the current value OR
+     * if the current value is past the current {@code nowNanos} time: this last condition is needed to make sure we keep
+     * tracking the earliest expiry time even while we prune previous values, so that at the end of the pruning task,
+     * we can reconcile between the earliest expiry time recorded at pruning and the one recorded at insert time.
+     */
     private long maybeUpdateEarliestExpiryTime(long nowNanos, long candidateTime)
     {
         return earliestExpiresAtUpdater.accumulateAndGet(this, candidateTime, (oldTime, newTime) -> {
@@ -259,6 +267,12 @@ class OutboundMessageQueue
         internalQueue.prune(pruner);
 
         nextExpirationDeadlineUpdater.set(this, maybeUpdateEarliestExpiryTime(nowNanos, pruner.earliestExpiresAt));
+    }
+
+    @VisibleForTesting
+    long nextExpirationIn(long nowNanos, TimeUnit unit)
+    {
+        return unit.convert(nextExpirationDeadline - nowNanos, TimeUnit.NANOSECONDS);
     }
 
     private static class Locked implements Runnable
