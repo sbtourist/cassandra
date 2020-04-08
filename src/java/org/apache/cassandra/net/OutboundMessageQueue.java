@@ -65,8 +65,11 @@ class OutboundMessageQueue
     private final PrunableArrayQueue<Message<?>> internalQueue = new PrunableArrayQueue<>(256);
 
     private volatile long earliestExpiresAt = Long.MAX_VALUE;
+    private volatile long nextExpirationDeadline = Long.MAX_VALUE;
     private static final AtomicLongFieldUpdater<OutboundMessageQueue> earliestExpiresAtUpdater =
         AtomicLongFieldUpdater.newUpdater(OutboundMessageQueue.class, "earliestExpiresAt");
+    private static final AtomicLongFieldUpdater<OutboundMessageQueue> nextExpirationDeadlineUpdater =
+        AtomicLongFieldUpdater.newUpdater(OutboundMessageQueue.class, "nextExpirationDeadline");
 
     OutboundMessageQueue(MessageConsumer<RuntimeException> onExpired)
     {
@@ -78,9 +81,10 @@ class OutboundMessageQueue
      */
     void add(Message<?> m)
     {
-        //maybePruneExpired();
+        maybePruneExpired();
         externalQueue.offer(m);
-        maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
+        maybeUpdateEarliestExpiryTime(approxTime.now(), m.expiresAtNanos());
+        nextExpirationDeadlineUpdater.accumulateAndGet(this, earliestExpiresAt, Math::min);
     }
 
     /**
@@ -136,7 +140,6 @@ class OutboundMessageQueue
         private WithLock(long nowNanos)
         {
             this.nowNanos = nowNanos;
-            earliestExpiresAt = Long.MAX_VALUE;
             externalQueue.drain(internalQueue::offer);
         }
 
@@ -185,7 +188,9 @@ class OutboundMessageQueue
         @Override
         public void close()
         {
-            //pruneInternalQueueWithLock(nowNanos);
+            if (approxTime.isAfter(nowNanos, nextExpirationDeadline))
+                pruneInternalQueueWithLock(nowNanos);
+
             unlock();
         }
     }
@@ -200,15 +205,20 @@ class OutboundMessageQueue
 
     private boolean maybePruneExpired(long nowNanos)
     {
-        if (approxTime.isAfter(nowNanos, earliestExpiresAt))
+        if (approxTime.isAfter(nowNanos, nextExpirationDeadline))
             return tryRun(() -> pruneWithLock(nowNanos));
+        
         return false;
     }
 
-    private void maybeUpdateMinimumExpiryTime(long newTime)
+    private long maybeUpdateEarliestExpiryTime(long nowNanos, long candidateTime)
     {
-        if (newTime < earliestExpiresAt)
-            earliestExpiresAtUpdater.accumulateAndGet(this, newTime, Math::min);
+        return earliestExpiresAtUpdater.accumulateAndGet(this, candidateTime, (oldTime, newTime) -> {
+            if (newTime < oldTime || (approxTime.isAfter(nowNanos, oldTime)))
+                return newTime;
+            else
+                return oldTime;
+        });
     }
 
     /*
@@ -216,7 +226,6 @@ class OutboundMessageQueue
      */
     private void pruneWithLock(long nowNanos)
     {
-        earliestExpiresAt = Long.MAX_VALUE;
         externalQueue.drain(internalQueue::offer);
         pruneInternalQueueWithLock(nowNanos);
     }
@@ -249,7 +258,7 @@ class OutboundMessageQueue
         Pruner pruner = new Pruner();
         internalQueue.prune(pruner);
 
-        maybeUpdateMinimumExpiryTime(pruner.earliestExpiresAt);
+        nextExpirationDeadlineUpdater.set(this, maybeUpdateEarliestExpiryTime(nowNanos, pruner.earliestExpiresAt));
     }
 
     private static class Locked implements Runnable
@@ -442,7 +451,7 @@ class OutboundMessageQueue
             earliestExpiresAt = Long.MAX_VALUE;
             externalQueue.drain(internalQueue::offer);
             internalQueue.prune(remover);
-            maybeUpdateMinimumExpiryTime(remover.earliestExpiresAt);
+            maybeUpdateEarliestExpiryTime(approxTime.now(), remover.earliestExpiresAt);
             done.countDown();
         }
     }
